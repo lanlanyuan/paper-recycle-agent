@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper-recycle-agent"
+version = "1.0.0"
+description = "废纸回收 Agent 对话助手：分类、估价与交互（纯标准库）"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "梁湘瑶 / 阿岩" }]
+keywords = ["recycling", "paper", "agent", "cli"]
+
+[project.scripts]
+paper-recycle-agent = "paper_recycle_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

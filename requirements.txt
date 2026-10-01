@@ -1,0 +1,5 @@
+# 运行时依赖：无（本项目仅使用 Python 标准库）
+# 开发 / 测试 / 可选 Web 服务依赖见下方注释
+pytest>=7.0          # 单元测试
+# fastapi>=0.110      # 可选：HTTP 对话服务（app/server.py）
+# uvicorn>=0.29       # 可选：运行 FastAPI 服务
