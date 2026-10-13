@@ -1,3 +1,8 @@
-"""废纸回收 Agent 对话助手（开发中）。"""
+"""废纸回收 Agent 对话助手。"""
 
-__version__ = "0.0.1"
+from . import agent, classifier, knowledge, pricing
+from .agent import respond
+
+__version__ = "1.0.0"
+
+__all__ = ["agent", "classifier", "knowledge", "pricing", "respond"]
