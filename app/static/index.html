@@ -41,7 +41,13 @@
   .inputbar button:disabled { opacity: .5; cursor: default; }
   #micBtn { background: #fff; color: var(--brand); border: 1px solid var(--border); width: 40px; padding: 0; font-size: 17px; }
   #micBtn.listening { background: #fde8e8; border-color: #f5b5b5; animation: pulse 1s infinite; }
+  #micBtn:disabled { opacity: .4; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(220,80,80,.4);} 70%{box-shadow:0 0 0 10px rgba(220,80,80,0);} 100%{box-shadow:0 0 0 0 rgba(220,80,80,0);} }
+  .voice-status { display: none; padding: 0 16px 10px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+  .voice-status.show { display: block; }
+  .voice-status.info { color: var(--brand); }
+  .voice-status.err { color: #b42318; background: #fef3f2; border-top: 1px solid #fecdca; padding: 8px 16px; }
+  .voice-status.ok { color: var(--brand); }
 
   /* ---------- 右：统计面板 ---------- */
   .side { width: 500px; border-left: 1px solid var(--border); background: var(--panel);
@@ -117,18 +123,19 @@
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.3.0 · 全国+省级统计 · 历年数据 · 八大类分类 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.4.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
 </header>
 <div class="layout">
   <div class="chat">
     <div class="messages" id="messages"></div>
     <div class="chips" id="chips"></div>
     <div class="inputbar">
-      <button id="micBtn" title="语音输入（需 Chrome / Edge）">🎤</button>
+      <button id="micBtn" title="语音输入（Chrome / Edge，需 HTTPS 与麦克风权限）">🎤</button>
       <input id="input" placeholder="说或输入：纸箱 2kg / 山东省回收量 / 2020年分类数据 / 历年趋势"
              onkeydown="if(event.key==='Enter')send()" />
       <button id="sendBtn" onclick="send()">发送</button>
     </div>
+    <div class="voice-status" id="voiceStatus"></div>
   </div>
 
   <aside class="side">
@@ -136,6 +143,7 @@
       <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
+      <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
     </div>
 
     <!-- 区域统计 -->
@@ -227,6 +235,43 @@
         <div id="standardsBody"></div>
       </details>
     </section>
+
+    <!-- 企业分布 -->
+    <section class="pane" id="pane-enterprise">
+      <div class="yearbar" style="flex-wrap:wrap">
+        <span>省份</span>
+        <select id="entProv" onchange="loadEnterprises()"></select>
+        <span>大类</span>
+        <select id="entCat" onchange="loadEnterprises()"></select>
+        <span>类型</span>
+        <select id="entType" onchange="loadEnterprises()"></select>
+      </div>
+      <div class="notice" id="entNotice"></div>
+      <div class="sect-title">
+        <span>企业地理分布（示意图）</span>
+        <span class="hintline" id="entTotal"></span>
+      </div>
+      <div class="chart" style="padding:4px">
+        <svg id="entMap" viewBox="0 0 480 300" style="width:100%;height:300px;display:block"></svg>
+      </div>
+      <div class="sect-title"><span>按类型</span><span class="hintline">点数量与量级</span></div>
+      <div class="chart" id="entTypeChart"></div>
+      <div class="sect-title"><span>企业明细</span><span class="hintline">按年回收量降序</span></div>
+      <div class="scroll" style="max-height:260px">
+        <table id="entTable">
+          <thead>
+            <tr>
+              <th>企业</th><th>城市</th><th>类型</th>
+              <th class="num">年回收量(万吨)</th><th>主营</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button onclick="exportExcel()">导出 Excel（含企业名录）</button>
+      </div>
+    </section>
   </aside>
 </div>
 
@@ -287,6 +332,7 @@
     document.querySelectorAll(".pane").forEach(p => {
       p.classList.toggle("active", p.id === "pane-" + name);
     });
+    if (name === "enterprise") loadEnterprises();
   }
 
   /* ---------------- 区域 ---------------- */
@@ -440,6 +486,7 @@
       renderProvTable(data.children);
       renderHistory(data.history, data.scope);
       renderCategory(data.categories, data.base_tonnage, data.node.name);
+      initEntFilters();
       const back = document.getElementById("backBtn");
       back.textContent = data.scope === "national" ? "已在最上级" : "返回全国";
       back.disabled = data.scope === "national";
@@ -465,6 +512,127 @@
 
   function goBack() {
     loadStats("CN", state.year);
+  }
+
+  /* ---------------- 企业分布 ---------------- */
+  const ENT_COLORS = {
+    "回收站点": "#8fbfa3",
+    "分拣打包中心": "#4a9d6b",
+    "造纸企业": "#1f5c3a",
+    "贸易商": "#b7a06a"
+  };
+  let entReady = false;
+
+  function initEntFilters() {
+    if (entReady || !state.data) return;
+    entReady = true;
+    const provSel = document.getElementById("entProv");
+    provSel.innerHTML = `<option value="">全部省份</option>` +
+      state.data.children.map(c => `<option value="${c.code}">${c.name}</option>`).join("");
+    const catSel = document.getElementById("entCat");
+    catSel.innerHTML = `<option value="">全部大类</option>` +
+      state.data.categories.map(c => `<option value="${c.code}">${c.code} ${c.name}</option>`).join("");
+    const typeSel = document.getElementById("entType");
+    typeSel.innerHTML = `<option value="">全部类型</option>` +
+      Object.keys(ENT_COLORS).map(t => `<option value="${t}">${t}</option>`).join("");
+  }
+
+  async function loadEnterprises() {
+    initEntFilters();
+    const prov = document.getElementById("entProv").value;
+    const cat = document.getElementById("entCat").value;
+    const typ = document.getElementById("entType").value;
+    const q = new URLSearchParams();
+    if (prov) q.set("province", prov);
+    if (cat) q.set("category", cat);
+    if (typ) q.set("type", typ);
+    try {
+      const res = await fetch("/api/enterprises?" + q.toString());
+      const d = await res.json();
+      renderEntNotice(d);
+      renderEntMap(d.list);
+      renderEntTypeChart(d.by_type);
+      renderEntTable(d.list);
+      const v = d.list.reduce((s, e) => s + e.volume, 0);
+      document.getElementById("entTotal").textContent =
+        `${d.list.length} 家 · 合计 ${v.toFixed(1)} 万吨`;
+    } catch (e) {
+      document.getElementById("entNotice").textContent = "企业数据加载失败：" + e;
+    }
+  }
+
+  function renderEntNotice(d) {
+    const el = document.getElementById("entNotice");
+    if (d.is_demo) {
+      el.innerHTML = `当前为<b>示例企业名录</b>（名称为虚构），用于演示「企业 × 地理位置 × 品类」分析。
+        在项目根目录放 <code>data/enterprises.csv</code> 即可替换为真实名录，页面自动切换为真实数据。`;
+    } else {
+      el.innerHTML = `当前加载的是<b>自有企业名录</b>（data/enterprises.csv），共 ${d.totals.count} 家。`;
+    }
+  }
+
+  function renderEntMap(list) {
+    const svg = document.getElementById("entMap");
+    if (!list.length) {
+      svg.innerHTML = `<text x="240" y="150" text-anchor="middle" fill="#6b7280" font-size="12">当前筛选没有企业</text>`;
+      return;
+    }
+    const X = lon => 22 + (lon - 73) / (135 - 73) * 436;
+    const Y = lat => 14 + (54 - lat) / (54 - 18) * 272;
+    const maxV = Math.max(...list.map(e => e.volume));
+    let out = `<rect x="1" y="1" width="478" height="298" fill="#fbfcfd" stroke="#e5e7eb" rx="6"/>`;
+    // 参考网格
+    for (let lon = 80; lon <= 130; lon += 10) {
+      out += `<line x1="${X(lon)}" y1="14" x2="${X(lon)}" y2="286" stroke="#eef1f4"/>`;
+      out += `<text x="${X(lon)}" y="296" font-size="9" fill="#9aa3af" text-anchor="middle">${lon}°E</text>`;
+    }
+    for (let lat = 20; lat <= 50; lat += 10) {
+      out += `<line x1="22" y1="${Y(lat)}" x2="458" y2="${Y(lat)}" stroke="#eef1f4"/>`;
+      out += `<text x="2" y="${Y(lat) + 3}" font-size="9" fill="#9aa3af">${lat}°N</text>`;
+    }
+    list.forEach(e => {
+      const r = 3 + Math.sqrt(e.volume / maxV) * 9;
+      const color = ENT_COLORS[e.type] || "#4a9d6b";
+      out += `<circle cx="${X(e.lon).toFixed(1)}" cy="${Y(e.lat).toFixed(1)}" r="${r.toFixed(1)}"
+                fill="${color}" fill-opacity="0.72" stroke="#ffffff" stroke-width="1">
+                <title>${e.name}\n${e.city} · ${e.type}\n年回收量 ${e.volume} 万吨\n主营 ${e.category_names.join("、")}</title>
+              </circle>`;
+    });
+    // 图例
+    let lx = 30;
+    Object.keys(ENT_COLORS).forEach(t => {
+      out += `<circle cx="${lx}" cy="10" r="3.5" fill="${ENT_COLORS[t]}"/>`;
+      out += `<text x="${lx + 7}" y="13" font-size="9" fill="#6b7280">${t}</text>`;
+      lx += 78;
+    });
+    svg.innerHTML = out;
+  }
+
+  function renderEntTypeChart(byType) {
+    const rows = byType.filter(t => t.count > 0);
+    const max = Math.max(...rows.map(t => t.volume), 1);
+    document.getElementById("entTypeChart").innerHTML = rows.map(t =>
+      `<div class="rowc" style="grid-template-columns:96px 1fr 74px">
+         <div class="lbl">${t.type}</div>
+         <div class="track"><div class="fill" style="width:${(t.volume / max * 100).toFixed(1)}%;background:${ENT_COLORS[t.type] || "#4a9d6b"}"></div></div>
+         <div class="val">${t.count}家 / ${t.volume}</div>
+       </div>`).join("");
+  }
+
+  function renderEntTable(list) {
+    const tb = document.querySelector("#entTable tbody");
+    if (!list.length) {
+      tb.innerHTML = `<tr><td colspan="5" class="empty">当前筛选没有企业</td></tr>`;
+      return;
+    }
+    tb.innerHTML = list.map(e =>
+      `<tr title="${e.note}">
+         <td>${e.name}</td>
+         <td>${e.city}</td>
+         <td>${e.type}</td>
+         <td class="num">${e.volume}</td>
+         <td>${e.category_names.join("、")}</td>
+       </tr>`).join("");
   }
 
   /* ---------------- Excel 导出 ---------------- */
@@ -516,31 +684,107 @@
     } catch (e) { /* ignore */ }
   }
 
-  /* ---------------- 语音输入 ---------------- */
+  /* ---------------- 语音输入 ----------------
+     浏览器 Web Speech API 的失败点很多，而且 onerror 默认是静默的，
+     用户只会看到「按了没反应」。这里把每个失败原因都翻译成人话并显示出来。
+  */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const voiceEl = document.getElementById("voiceStatus");
   let recog = null;
+  let voiceDone = false;
+
+  function voiceMsg(text, kind) {
+    voiceEl.textContent = text || "";
+    voiceEl.className = "voice-status" + (text ? " show " + (kind || "info") : "");
+  }
+
+  const VOICE_ERRORS = {
+    "not-allowed": "麦克风权限被拒绝。点地址栏左侧的锁/摄像头图标 → 把「麦克风」改为允许，再刷新页面。",
+    "service-not-allowed": "浏览器禁用了语音识别服务（可能被企业策略或安全软件拦截）。请改用文字输入。",
+    "audio-capture": "没有检测到麦克风。请检查麦克风是否插好、系统里是否被静音。",
+    "network": "语音识别服务连接失败。Chrome 的识别服务在部分网络环境下不可用，请改用文字输入。",
+    "no-speech": "没有听到声音。请靠近麦克风，看到「正在听…」后再说话。",
+    "aborted": "语音输入已取消。",
+    "language-not-supported": "当前浏览器不支持中文语音识别。",
+    "bad-grammar": "识别语法错误，请重试。"
+  };
+
+  // 启动前先体检，把「注定失败」的情况直接说清楚，而不是让用户按了没反应
+  function voicePreflight() {
+    if (window.self !== window.top) {
+      return "当前页面嵌在预览框里，浏览器一般会屏蔽麦克风。请点右上角「在浏览器中打开」后重试，或直接用文字输入。";
+    }
+    if (!window.isSecureContext) {
+      return "语音输入要求 HTTPS 或 localhost 环境，当前地址不满足，浏览器会直接拒绝麦克风。";
+    }
+    if (!SR) {
+      return "当前浏览器不支持语音识别。请用 Chrome 或 Edge（Firefox / 部分 Safari 不支持）。";
+    }
+    return null;
+  }
+
   if (SR) {
     recog = new SR();
     recog.lang = "zh-CN";
-    recog.interimResults = false;
+    recog.continuous = false;
+    recog.interimResults = true;   // 先出临时结果，让用户看到「确实在识别」
     recog.maxAlternatives = 1;
-    recog.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      inputEl.value = text;
-      send();
+
+    recog.onstart = () => {
+      voiceDone = false;
+      voiceMsg("正在听…请说话（说完会自动结束）", "info");
     };
-    recog.onerror = () => micBtn.classList.remove("listening");
-    recog.onend = () => micBtn.classList.remove("listening");
+    recog.onresult = (e) => {
+      let interim = "", final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (interim) inputEl.value = interim;          // 实时回显，证明麦克风在工作
+      if (final) {
+        voiceDone = true;
+        inputEl.value = final;
+        voiceMsg("识别完成：" + final, "ok");
+        send();
+      }
+    };
+    recog.onerror = (ev) => {
+      const code = ev.error || "unknown";
+      voiceMsg("语音输入失败（" + code + "）：" + (VOICE_ERRORS[code] || "未知错误，请改用文字输入。"), "err");
+      micBtn.classList.remove("listening");
+    };
+    recog.onend = () => {
+      micBtn.classList.remove("listening");
+      micBtn.disabled = false;
+      if (!voiceDone && voiceEl.className.indexOf("err") === -1) {
+        voiceMsg("没有识别到内容，可以再说一次，或直接打字。", "info");
+      }
+    };
   }
+
   micBtn.onclick = () => {
-    if (!recog) { alert("当前浏览器不支持语音输入，请用 Chrome / Edge 打开。"); return; }
+    const block = voicePreflight();
+    if (block) { voiceMsg(block, "err"); return; }
+    if (micBtn.classList.contains("listening")) {   // 再点一次 = 停止
+      try { recog.stop(); } catch (e) {}
+      return;
+    }
     micBtn.classList.add("listening");
-    try { recog.start(); } catch (e) { recog.stop(); }
+    micBtn.disabled = true;
+    setTimeout(() => { micBtn.disabled = false; }, 600);
+    try {
+      recog.start();
+    } catch (e) {
+      // 上一次还没结束就再次 start() 会抛 InvalidStateError
+      micBtn.classList.remove("listening");
+      voiceMsg("识别会话还没结束，请稍等一秒再按一次。", "err");
+    }
   };
 
   addMsg("你好，我是废纸回收助手 🪨\n" +
-         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量。\n" +
-         "右侧三个标签页分别是「区域统计」「历年数据」「分类结构」，都可导出 Excel。", "bot");
+         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量、某省有哪些回收企业。\n" +
+         "右侧四个标签页：区域统计 / 历年数据 / 分类结构 / 企业分布，都可导出 Excel。\n" +
+         "语音输入若不可用，页面输入框下方会直接告诉你原因。", "bot");
   loadStats("CN", 2024);
   loadInfo();
 </script>
