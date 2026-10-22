@@ -3,7 +3,7 @@
 > 版本：v1.3.0　生成日期：2026-10-22　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`0954f3d`
+- 生成时提交：`278bbb3`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -1381,7 +1381,7 @@ SOURCES: List[str] = [
 
 ## 二、Web 应用（app/）
 
-### `app/server.py`（147 行）
+### `app/server.py`（183 行）
 
 ```python
 """FastAPI 服务：废纸回收 Agent 的图形界面与对话接口。
@@ -1401,7 +1401,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1416,16 +1416,34 @@ app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 DEFAULT_YEAR = regions.NATIONAL_YEAR
 
+# 不能回落到首页的路径前缀（接口、静态资源、文档）
+_API_PREFIXES = ("api/", "export", "static/", "docs", "redoc", "openapi.json", "health")
+
 
 class ChatReq(BaseModel):
     message: str
 
 
+def _index_html() -> HTMLResponse:
+    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/index.html", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+    return _index_html()
+
+
+@app.head("/", include_in_schema=False)
+@app.head("/index.html", include_in_schema=False)
+def index_head() -> Response:
+    """部分托管环境/预览面板会先发 HEAD 探测，缺了会返回 405。"""
+    return Response(
+        status_code=200,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -1487,7 +1505,8 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
 
     return {
         "node": _shallow(node),  # type: ignore[arg-type]
-        "children": [_shallow(c) for c in regions.get_children(node_code)],
+        # 始终返回全部省份，便于在选中某省后仍能看到完整排名并切换
+        "children": [_shallow(c) for c in regions.get_children("CN")],
         "breadcrumb": regions.breadcrumb(node_code),
         "year": year,
         "years": sorted(valid_years),
@@ -1531,6 +1550,23 @@ def chat(req: ChatReq) -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.head("/{full_path:path}", include_in_schema=False)
+@app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
+def spa_fallback(full_path: str) -> Response:
+    """兜底路由：任何未匹配的页面路径都回落到首页。
+
+    托管平台/预览面板可能带前缀或用 `/index`、`/home` 之类的路径访问，
+    没有兜底时这些请求会拿到 FastAPI 的 `{"detail":"Not Found"}`。
+    接口与静态资源路径仍保持 404，避免掩盖真实错误。
+    """
+    if full_path.startswith(_API_PREFIXES):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    if full_path and "." in full_path.rsplit("/", 1)[-1]:
+        # 带扩展名的资源请求（如 /logo.png）应如实 404
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return _index_html()
 ```
 
 ### `app/static/index.html`（548 行）
@@ -2432,6 +2468,106 @@ def test_tree_structure():
     assert all(c["children"] == [] for c in tree["children"])
 ```
 
+### `tests/test_server.py`（95 行）
+
+```python
+"""Web 层路由测试：锁死「打开就是 Not Found」这类回归。
+
+历史上踩过两次：
+1. 只注册了 `/`，预览面板请求 `/index.html` → 404；
+2. 托管环境用 HEAD 探测 / 或带路径前缀访问 → 405 / 404。
+
+因此这里对每个入口路径都断言状态码，并检查首页确实带版本号。
+"""
+
+import pytest
+
+pytest.importorskip("httpx", reason="TestClient 依赖 httpx")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.server import app  # noqa: E402
+
+client = TestClient(app)
+
+
+def test_root_ok():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "废纸回收 Agent" in r.text
+    assert "v1.3" in r.text
+
+
+def test_index_html_ok():
+    r = client.get("/index.html")
+    assert r.status_code == 200
+    assert "<!DOCTYPE html>" in r.text
+
+
+def test_head_root_ok():
+    """托管平台会用 HEAD 探测，405 会被显示成页面不可用。"""
+    assert client.head("/").status_code == 200
+    assert client.head("/index.html").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/index", "/home", "/app/", "/some/prefix/"])
+def test_unknown_page_falls_back_to_index(path):
+    r = client.get(path)
+    assert r.status_code == 200
+    assert "<!DOCTYPE html>" in r.text
+
+
+@pytest.mark.parametrize("path", ["/api/nope", "/logo.png", "/export.csv"])
+def test_api_and_assets_still_404(path):
+    r = client.get(path)
+    assert r.status_code == 404
+
+
+def test_favicon_no_content():
+    assert client.get("/favicon.ico").status_code == 204
+
+
+def test_stats_api():
+    r = client.get("/api/stats", params={"code": "CN", "year": 2024})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["node"]["code"] == "CN"
+    assert len(data["children"]) == 34
+    assert len(data["categories"]) == 8
+    assert len(data["history"]) >= 8
+
+
+def test_stats_province_keeps_full_list():
+    r = client.get("/api/stats", params={"code": "370000"})
+    data = r.json()
+    assert data["node"]["name"] == "山东省"
+    # 选中省份后仍要返回全部省份，否则排名表会变空
+    assert len(data["children"]) == 34
+
+
+def test_info_api():
+    data = client.get("/api/info").json()
+    assert len(data["categories"]) == 8
+    assert 2024 in data["years"]
+
+
+def test_export_xlsx():
+    r = client.get("/export.xlsx", params={"code": "CN", "year": 2024})
+    assert r.status_code == 200
+    assert r.content[:2] == b"PK"
+    assert "spreadsheetml" in r.headers["content-type"]
+
+
+def test_chat():
+    r = client.post("/chat", json={"message": "纸箱 2kg"})
+    assert r.status_code == 200
+    assert "reply" in r.json()
+
+
+def test_health():
+    assert client.get("/health").json() == {"status": "ok"}
+```
+
 ### `tests/test_stats.py`（84 行）
 
 ```python
@@ -2549,6 +2685,26 @@ if __name__ == "__main__":
     uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
 ```
 
+### `conftest.py`（15 行）
+
+```python
+"""pytest 全局配置：让 `src/` 与仓库根目录都可直接 import。
+
+- `src/`：核心包 paper_recycle_agent
+- 仓库根：Web 应用 app.server（测试需要导入 FastAPI 实例）
+"""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+for path in (ROOT, ROOT / "src"):
+    entry = str(path)
+    if entry not in sys.path:
+        sys.path.insert(0, entry)
+```
+
 ### `pyproject.toml`（19 行）
 
 ```toml
@@ -2573,7 +2729,7 @@ paper-recycle-agent = "paper_recycle_agent.cli:main"
 where = ["src"]
 ```
 
-### `requirements.txt`（6 行）
+### `requirements.txt`（7 行）
 
 ```text
 # 运行时依赖：无（核心包仅使用 Python 标准库）
@@ -2582,6 +2738,7 @@ pytest>=7.0          # 单元测试（CI 使用）
 fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
 openpyxl>=3.1        # 导出 Excel（/export.xlsx）
+httpx>=0.27          # Web 路由测试（fastapi.testclient 依赖）
 ```
 
 ### `.github/workflows/ci.yml`（29 行）
@@ -2620,7 +2777,7 @@ jobs:
 
 ## 五、工具脚本（tools/）
 
-### `tools/gen_code_listing.py`（124 行）
+### `tools/gen_code_listing.py`（125 行）
 
 ```python
 """生成 docs/CODE_LISTING.md：把全部源码嵌入一份独立的代码清单文档。
@@ -2664,6 +2821,7 @@ SECTIONS = [
 
 ROOT_FILES = [
     "run.py",
+    "conftest.py",
     "pyproject.toml",
     "requirements.txt",
     ".github/workflows/ci.yml",
@@ -2751,4 +2909,4 @@ if __name__ == "__main__":
 
 ---
 
-共收录 24 个文件。
+共收录 26 个文件。

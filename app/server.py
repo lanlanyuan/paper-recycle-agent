@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,16 +30,34 @@ app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 DEFAULT_YEAR = regions.NATIONAL_YEAR
 
+# 不能回落到首页的路径前缀（接口、静态资源、文档）
+_API_PREFIXES = ("api/", "export", "static/", "docs", "redoc", "openapi.json", "health")
+
 
 class ChatReq(BaseModel):
     message: str
 
 
+def _index_html() -> HTMLResponse:
+    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/index.html", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
+    return _index_html()
+
+
+@app.head("/", include_in_schema=False)
+@app.head("/index.html", include_in_schema=False)
+def index_head() -> Response:
+    """部分托管环境/预览面板会先发 HEAD 探测，缺了会返回 405。"""
+    return Response(
+        status_code=200,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -146,3 +164,20 @@ def chat(req: ChatReq) -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.head("/{full_path:path}", include_in_schema=False)
+@app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
+def spa_fallback(full_path: str) -> Response:
+    """兜底路由：任何未匹配的页面路径都回落到首页。
+
+    托管平台/预览面板可能带前缀或用 `/index`、`/home` 之类的路径访问，
+    没有兜底时这些请求会拿到 FastAPI 的 `{"detail":"Not Found"}`。
+    接口与静态资源路径仍保持 404，避免掩盖真实错误。
+    """
+    if full_path.startswith(_API_PREFIXES):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    if full_path and "." in full_path.rsplit("/", 1)[-1]:
+        # 带扩展名的资源请求（如 /logo.png）应如实 404
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return _index_html()

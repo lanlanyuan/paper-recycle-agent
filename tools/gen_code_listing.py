@@ -39,6 +39,7 @@ SECTIONS = [
 
 ROOT_FILES = [
     "run.py",
+    "conftest.py",
     "pyproject.toml",
     "requirements.txt",
     ".github/workflows/ci.yml",
