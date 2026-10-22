@@ -13,6 +13,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from typing import List
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "CODE_LISTING.md"
@@ -56,7 +57,7 @@ def _version() -> str:
     return "unknown"
 
 
-def _files(path: Path, recursive: bool) -> list[Path]:
+def _files(path: Path, recursive: bool) -> List[Path]:
     if path.is_file():
         return [path]
     pattern = "**/*" if recursive else "*"
@@ -86,7 +87,7 @@ def _git(*args: str) -> str:
 
 
 def main() -> int:
-    parts: list[str] = []
+    parts: List[str] = []
     version = _version()
     parts.append(
         "# 代码清单\n\n"

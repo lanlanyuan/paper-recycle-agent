@@ -1,7 +1,12 @@
-# 运行时依赖：无（核心包仅使用 Python 标准库）
-# 开发 / 测试 / 图形界面依赖见下方注释
-pytest>=7.0          # 单元测试（CI 使用）
-fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
+# 核心包 paper_recycle_agent 零依赖，只用 Python 标准库。
+# 本文件是「图形界面 + Excel 导出 + 测试」的完整依赖集，等价于：pip install .[all]
+#
+# 只要命令行 / 离线版？什么都不用装：
+#   PYTHONPATH=src python -m paper_recycle_agent.cli history
+#   python tools/build_offline.py     # 生成 dist/paper-recycle-offline.html
+
+fastapi>=0.110       # 图形界面 / HTTP 服务（FastAPI 0.110 要求 Python 3.8+）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
-openpyxl>=3.1        # 导出 Excel（/export.xlsx）
 httpx>=0.27          # Web 路由测试（fastapi.testclient 依赖）
+openpyxl>=3.1        # 导出 Excel（可选：缺失时 /export.xlsx 返回 503 并给出安装提示）
+pytest>=7.0          # 单元测试（CI 使用）
