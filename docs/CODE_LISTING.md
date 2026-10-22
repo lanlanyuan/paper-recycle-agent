@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.6.0　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.6.1　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`482f5d3`
+- 生成时提交：`3d9efba`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -38,7 +38,7 @@ from . import (agent, classifier, data, enterprises, exporter, io_table,  # noqa
                knowledge, llm, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 
 __all__ = [
     "agent",
@@ -866,7 +866,7 @@ def summary(province: Optional[str] = None) -> str:
     return "\n".join(lines)
 ```
 
-### `src/paper_recycle_agent/exporter.py`（362 行）
+### `src/paper_recycle_agent/exporter.py`（363 行）
 
 ```python
 """Excel 导出：面向统计局/行业协会的多表工作簿。
@@ -1160,11 +1160,12 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
     ws6io.append([])
     ws6io.append([f"{scope_name} 分省消耗金额（亿元）"])
     ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
-    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "数据性质"])
+    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "金额性质", "回收量性质"])
     head_row = ws6io.max_row
-    _style_header(ws6io, head_row, 5)
+    _style_header(ws6io, head_row, 6)
     for r in io_table.province_spend(year)["rows"]:
-        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"], r["provenance"]])
+        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"],
+                      r["provenance"], r["recovery_provenance"]])
 
     ws6io.append([])
     ws6io.append(["企业采购金额（示例：年经手量 × 均价）"])
@@ -1233,7 +1234,7 @@ def filename(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> str:
     return f"废纸回收统计_{node['name']}_{year}.xlsx"
 ```
 
-### `src/paper_recycle_agent/io_table.py`（484 行）
+### `src/paper_recycle_agent/io_table.py`（487 行）
 
 ```python
 """投入产出模型：把「废纸回收量」换算成「消耗金额」，并给出产业关联系数。
@@ -1485,7 +1486,10 @@ def province_spend(year: int = 2024, code: Optional[str] = None) -> Dict[str, ob
             "share_pct": round(share * 100, 2),
             "recovery": node["stats"]["回收量(万吨)"],  # type: ignore[index]
             "amount": round(total * share, 1),
-            "provenance": (
+            # 金额永远是分摊估算：回收量可能是报道值，但「金额」是拿它乘出来的。
+            # 把回收量的口径单独放在 recovery_provenance，避免金额被误读成官方数据。
+            "provenance": PROVENANCE_ESTIMATED,
+            "recovery_provenance": (
                 PROVENANCE_OFFICIAL if node["quality"] == "reported"
                 else PROVENANCE_ESTIMATED
             ),
@@ -3237,7 +3241,7 @@ def spa_fallback(full_path: str) -> Response:
     return _index_html()
 ```
 
-### `app/static/index.html`（1518 行）
+### `app/static/index.html`（1519 行）
 
 ```html
 <!DOCTYPE html>
@@ -3575,7 +3579,7 @@ def spa_fallback(full_path: str) -> Response:
           <thead>
             <tr>
               <th class="num">#</th><th>省份</th>
-              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>口径</th>
+              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>金额口径</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -4181,8 +4185,9 @@ def spa_fallback(full_path: str) -> Response:
       d.levels.map(l =>
         `${l.name}（${l.io_available ? "有官方表" : "无官方表"}，${l.provenance}）`
       ).join("　") +
-      `。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
-      `这两级的金额都是分摊估算，不能当作统计公报数据引用。`;
+      `。省级虽有官方投入产出表，但本表的分省金额是按回收量占比分摊的，` +
+      `不是实际采购分布；国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
+      `市级与企业级同样只能分摊估算，都不能当作统计公报数据引用。`;
 
     document.getElementById("ioBasis").textContent = d.provinces.basis;
     document.querySelector("#ioProvTable tbody").innerHTML =
@@ -5317,7 +5322,7 @@ def test_export_unknown_code_falls_back_to_national():
     assert wb["省级统计"].max_row == 3 + 34 + 1
 ```
 
-### `tests/test_io_table.py`（224 行）
+### `tests/test_io_table.py`（231 行）
 
 ```python
 """投入产出模型测试。
@@ -5410,11 +5415,18 @@ def test_province_amount_sums_to_national():
     assert abs(total - data["total"]) < 1.0  # 逐行四舍五入的累计误差
 
 
-def test_province_provenance_reflects_quality():
-    """山东是公开报道值，不能被标成「估算」。"""
+def test_province_amount_is_always_estimated_but_recovery_keeps_its_quality():
+    """山东的回收量是报道值，但「金额」是拿它乘出来的分摊值，不能标官方。
+
+    这条测试原本断言 rows["山东省"]["provenance"] == 官方，是错的：
+    官方的是回收量，不是金额。金额一旦被标成官方，读表的人就会把它当统计公报数据引用。
+    """
     rows = {r["name"]: r for r in io_table.province_spend(2024)["rows"]}
-    assert rows["山东省"]["provenance"] == io_table.PROVENANCE_OFFICIAL
+    assert rows["山东省"]["provenance"] == io_table.PROVENANCE_ESTIMATED
     assert rows["山西省"]["provenance"] == io_table.PROVENANCE_ESTIMATED
+    # 回收量本身的口径要保留下来，供导出表单独一列展示
+    assert rows["山东省"]["recovery_provenance"] == io_table.PROVENANCE_OFFICIAL
+    assert rows["山西省"]["recovery_provenance"] == io_table.PROVENANCE_ESTIMATED
 
 
 def test_province_basis_says_not_actual_purchase():
@@ -6131,7 +6143,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.6.0"
+version = "1.6.1"
 description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
@@ -7022,7 +7034,7 @@ def main() -> int:
     html = TEMPLATE.replace("__VERSION__", payload["version"])
     html = html.replace("__DATA_JSON__", json.dumps(payload, ensure_ascii=False))
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(html, encoding="utf-8")
+    OUT.write_text(html, encoding="utf-8", newline="\n")
     print(f"已生成 {OUT.relative_to(ROOT)}（{OUT.stat().st_size} 字节）")
     return 0
 

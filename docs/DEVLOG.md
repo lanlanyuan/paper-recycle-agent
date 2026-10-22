@@ -448,6 +448,31 @@ const tick = () => {
 - **前端假 DOM 缺全局**：补了 `URLSearchParams`，以及 `/api/stats`、`/api/enterprises`、
   `/api/info` 三个桩，否则测试里 `Cannot read properties of undefined`。
 
+#### 七点五、上线前自查抓到的一处口径错误
+
+导出 Excel 逐行核对时发现：山东那一行「数据性质」写的是**官方**，但它的金额
+68.4 亿元 = 624.6 × 10.95%，明明是分摊出来的。原因在 `province_spend()`：
+
+```python
+"provenance": PROVENANCE_OFFICIAL if node["quality"] == "reported" else ...
+```
+
+`quality == "reported"` 说的是**回收量**来自公开报道，不是**金额**。金额永远是分摊值。
+这正是本项目一直在防的那类错误——标签一错，读表的人就会把它当统计公报数据引用。
+
+改法是把两个口径拆开：
+
+```python
+"provenance": PROVENANCE_ESTIMATED,          # 金额：永远是分摊
+"recovery_provenance": PROVENANCE_OFFICIAL if node["quality"] == "reported" else ...
+```
+
+Excel 的「投入产出」表相应拆成「金额性质 / 回收量性质」两列，现在读起来是
+「估算（分摊） | 官方」，一眼能看出哪部分是查来的、哪部分是算出来的。
+原来那条断言「山东的 provenance 必须是官方」的测试本身也写错了，一并改写并注明原因。
+
+顺带修了命令行摘要里「直接消耗系数　4.28」漏百分号的问题（读起来像 4.28 元）。
+
 #### 八、验证方式
 
 不只看 pytest 绿灯：

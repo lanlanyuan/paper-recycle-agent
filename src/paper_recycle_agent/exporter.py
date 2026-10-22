@@ -289,11 +289,12 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
     ws6io.append([])
     ws6io.append([f"{scope_name} 分省消耗金额（亿元）"])
     ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
-    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "数据性质"])
+    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "金额性质", "回收量性质"])
     head_row = ws6io.max_row
-    _style_header(ws6io, head_row, 5)
+    _style_header(ws6io, head_row, 6)
     for r in io_table.province_spend(year)["rows"]:
-        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"], r["provenance"]])
+        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"],
+                      r["provenance"], r["recovery_provenance"]])
 
     ws6io.append([])
     ws6io.append(["企业采购金额（示例：年经手量 × 均价）"])

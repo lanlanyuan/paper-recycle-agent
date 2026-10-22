@@ -333,7 +333,7 @@
           <thead>
             <tr>
               <th class="num">#</th><th>省份</th>
-              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>口径</th>
+              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>金额口径</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -939,8 +939,9 @@
       d.levels.map(l =>
         `${l.name}（${l.io_available ? "有官方表" : "无官方表"}，${l.provenance}）`
       ).join("　") +
-      `。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
-      `这两级的金额都是分摊估算，不能当作统计公报数据引用。`;
+      `。省级虽有官方投入产出表，但本表的分省金额是按回收量占比分摊的，` +
+      `不是实际采购分布；国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
+      `市级与企业级同样只能分摊估算，都不能当作统计公报数据引用。`;
 
     document.getElementById("ioBasis").textContent = d.provinces.basis;
     document.querySelector("#ioProvTable tbody").innerHTML =
