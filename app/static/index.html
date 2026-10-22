@@ -107,6 +107,8 @@
                     border: 1px solid var(--border); background: #fff; color: var(--ink); }
   .actions #exportBtn { background: var(--brand); color: #fff; border-color: var(--brand); }
   .actions button:disabled { opacity: .6; cursor: default; }
+  .export-msg { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 2px 2px 0; min-height: 15px; }
+  .export-msg.err { color: #C0392B; }
 
   .yearbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
   .yearbar select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; color: var(--ink); background: #fff; }
@@ -123,7 +125,7 @@
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.4.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.5.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -173,6 +175,7 @@
         <button id="backBtn" onclick="goBack()">返回全国</button>
         <button id="exportBtn" onclick="exportExcel()">导出 Excel</button>
       </div>
+      <div class="export-msg" id="exportMsg"></div>
     </section>
 
     <!-- 历年数据 -->
@@ -637,13 +640,37 @@
 
   /* ---------------- Excel 导出 ---------------- */
   async function exportExcel() {
-    const btns = [document.getElementById("exportBtn")].filter(Boolean);
-    const label = btns.length ? btns[0].textContent : "";
-    btns.forEach(b => { b.disabled = true; b.textContent = "导出中…"; });
+    const btn = document.getElementById("exportBtn");
+    const msg = document.getElementById("exportMsg");
+    const label = btn ? btn.textContent : "导出 Excel";
+    const say = (text, isErr) => {
+      if (!msg) return;
+      msg.textContent = text || "";
+      msg.classList.toggle("err", !!isErr);
+    };
+    const restore = (text) => {
+      if (!btn) return;
+      btn.textContent = text;
+      btn.disabled = false;
+    };
+    if (btn) { btn.disabled = true; btn.textContent = "导出中…"; }
+    say("");
     const url = `/export.xlsx?code=${encodeURIComponent(state.code)}&year=${state.year}`;
+    let serverReplied = false;
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error("HTTP " + res.status);
+      serverReplied = true;
+      if (!res.ok) {
+        // 服务端会用 JSON 说明原因（例如缺少 openpyxl 时返回 503）
+        let detail = `导出失败（HTTP ${res.status}）`;
+        let hint = "";
+        try {
+          const body = await res.json();
+          if (body && body.detail) detail = body.detail;
+          if (body && body.hint) hint = body.hint;
+        } catch (_) { /* 非 JSON 响应，保留默认文案 */ }
+        throw new Error(hint ? `${detail} ${hint}` : detail);
+      }
       const blob = await res.blob();
       const name = `废纸回收统计_${(state.data && state.data.node.name) || "全国"}_${state.year}.xlsx`;
       const obj = URL.createObjectURL(blob);
@@ -654,16 +681,19 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(obj), 4000);
-      btns.forEach(b => { b.textContent = "已导出 ✓"; });
-      setTimeout(() => {
-        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
-      }, 1600);
+      say(`已导出 ${name}（6 张工作表）`);
+      restore("已导出 ✓");
+      setTimeout(() => restore(label || "导出 Excel"), 1600);
     } catch (e) {
-      window.open(url, "_blank");
-      btns.forEach(b => { b.textContent = "已打开下载"; });
-      setTimeout(() => {
-        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
-      }, 1600);
+      if (!serverReplied) {
+        // 请求根本没到服务端（预览框拦截 / 网络异常），退化为直接打开下载链接
+        window.open(url, "_blank");
+        say("已尝试在新窗口打开下载链接");
+      } else {
+        say(e.message, true);
+      }
+      restore("导出失败");
+      setTimeout(() => restore(label || "导出 Excel"), 2400);
     }
   }
 
@@ -681,6 +711,17 @@
                        <div class="nt">${c.note}</div>`;
         box.appendChild(d);
       });
+      // 缺少 openpyxl 时提前说明，避免用户点了导出才看到失败
+      if (info.excel_available === false) {
+        const btn = document.getElementById("exportBtn");
+        const msg = document.getElementById("exportMsg");
+        if (btn) btn.title = "服务端未安装 openpyxl，导出会失败";
+        if (msg) {
+          msg.textContent = "服务端未安装 openpyxl，暂时无法导出 .xlsx。"
+            + "执行 pip install openpyxl 后重启服务即可；或改用离线版（自带 CSV 导出）。";
+          msg.classList.add("err");
+        }
+      }
     } catch (e) { /* ignore */ }
   }
 
