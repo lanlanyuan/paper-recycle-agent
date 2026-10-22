@@ -166,3 +166,41 @@ cp data/enterprises.csv.example data/enterprises.csv
 | 要求 HTTPS 或 localhost | 非安全上下文 | 用 https 或本机地址访问 |
 | 语音识别服务连接失败 | Chrome 识别服务在部分网络不可用 | 改用文字输入 |
 | 当前浏览器不支持 | Firefox / 部分 Safari 无此 API | 用 Chrome / Edge |
+
+## 打不开网站怎么办（三种打开方式）
+
+### ① 离线单文件（推荐先用这个）
+
+双击 `dist/paper-recycle-offline.html`，浏览器直接打开。
+
+- 全部数据内联在文件里，**不联网、不起服务**
+- 保留：对话问答、区域统计、历年数据、分类结构、企业分布、CSV 导出
+- 不含：xlsx 多表导出（需要 openpyxl）、语音输入（依赖浏览器服务）
+
+重新生成（数据更新后）：
+
+```bash
+PYTHONPATH=src python tools/build_offline.py
+```
+
+### ② 本地服务（要 xlsx 就用这个）
+
+双击 `启动本地版.bat`（Windows），等窗口出现提示后用浏览器打开 `http://localhost:8000`。
+
+命令行方式：
+
+```bash
+pip install -r requirements.txt
+PYTHONPATH=src PORT=8000 python run.py
+```
+
+### ③ 在线版
+
+需要能访问外网。如果浏览器提示"无法访问此网站"，通常是本机代理/DNS 问题：
+换一个网络、关掉代理，或直接改用 ① ②。
+
+### 排障顺序
+
+1. 先打开 ①，确认页面能渲染 → 说明代码没问题
+2. 再试 ②，确认本机 Python 环境正常 → 能拿到 xlsx
+3. 最后试 ③ → 只有这一步才涉及网络
