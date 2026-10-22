@@ -160,6 +160,14 @@ def test_summary_text_mentions_provenance():
     assert "地级市" in text
 
 
+def test_summary_text_coefficient_carries_percent_unit():
+    """直接消耗系数必须带 % —— 之前漏了单位，读起来像「4.28 元」。"""
+    text = io_table.summary_text(2024)
+    pct = io_table.direct_coefficient(2024)["coefficient_pct"]
+    assert ("%s%%" % pct) in text
+    assert "属下限" in text
+
+
 # ---------------------------------------------------------------- Leontief
 
 

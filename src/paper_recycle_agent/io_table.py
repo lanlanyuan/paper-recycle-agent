@@ -466,7 +466,7 @@ def summary_text(year: int = 2024) -> str:
     ]
     if d["coefficient"] is not None:
         lines.append(
-            "直接消耗系数　%s（采购 %s 亿元 ÷ 营业收入 %s 亿元）"
+            "直接消耗系数　%s%%（采购 %s 亿元 ÷ 营业收入 %s 亿元，属下限）"
             % (d["coefficient_pct"], d["spend"], d["revenue"])
         )
     if u["value"] is not None:
