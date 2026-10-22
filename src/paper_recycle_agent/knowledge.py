@@ -24,7 +24,7 @@ CATEGORIES: List[PaperCategory] = [
     PaperCategory(
         key="office",
         name="办公用纸",
-        aliases=["打印纸", "复印纸", "a4", "文件", "办公纸", "白纸", "资料"],
+        aliases=["打印纸", "复印纸", "a4", "文件", "办公纸", "办公用纸", "白纸", "资料"],
         recyclable=True,
         value_per_kg=1.1,
         tips="订书钉可保留，回形针建议取下；涉密文件请碎纸后交专业渠道。",
