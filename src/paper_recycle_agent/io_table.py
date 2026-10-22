@@ -247,7 +247,10 @@ def province_spend(year: int = 2024, code: Optional[str] = None) -> Dict[str, ob
             "share_pct": round(share * 100, 2),
             "recovery": node["stats"]["回收量(万吨)"],  # type: ignore[index]
             "amount": round(total * share, 1),
-            "provenance": (
+            # 金额永远是分摊估算：回收量可能是报道值，但「金额」是拿它乘出来的。
+            # 把回收量的口径单独放在 recovery_provenance，避免金额被误读成官方数据。
+            "provenance": PROVENANCE_ESTIMATED,
+            "recovery_provenance": (
                 PROVENANCE_OFFICIAL if node["quality"] == "reported"
                 else PROVENANCE_ESTIMATED
             ),

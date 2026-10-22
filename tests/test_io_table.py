@@ -88,11 +88,18 @@ def test_province_amount_sums_to_national():
     assert abs(total - data["total"]) < 1.0  # 逐行四舍五入的累计误差
 
 
-def test_province_provenance_reflects_quality():
-    """山东是公开报道值，不能被标成「估算」。"""
+def test_province_amount_is_always_estimated_but_recovery_keeps_its_quality():
+    """山东的回收量是报道值，但「金额」是拿它乘出来的分摊值，不能标官方。
+
+    这条测试原本断言 rows["山东省"]["provenance"] == 官方，是错的：
+    官方的是回收量，不是金额。金额一旦被标成官方，读表的人就会把它当统计公报数据引用。
+    """
     rows = {r["name"]: r for r in io_table.province_spend(2024)["rows"]}
-    assert rows["山东省"]["provenance"] == io_table.PROVENANCE_OFFICIAL
+    assert rows["山东省"]["provenance"] == io_table.PROVENANCE_ESTIMATED
     assert rows["山西省"]["provenance"] == io_table.PROVENANCE_ESTIMATED
+    # 回收量本身的口径要保留下来，供导出表单独一列展示
+    assert rows["山东省"]["recovery_provenance"] == io_table.PROVENANCE_OFFICIAL
+    assert rows["山西省"]["recovery_provenance"] == io_table.PROVENANCE_ESTIMATED
 
 
 def test_province_basis_says_not_actual_purchase():

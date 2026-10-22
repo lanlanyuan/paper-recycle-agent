@@ -728,7 +728,7 @@ def main() -> int:
     html = TEMPLATE.replace("__VERSION__", payload["version"])
     html = html.replace("__DATA_JSON__", json.dumps(payload, ensure_ascii=False))
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(html, encoding="utf-8")
+    OUT.write_text(html, encoding="utf-8", newline="\n")
     print(f"已生成 {OUT.relative_to(ROOT)}（{OUT.stat().st_size} 字节）")
     return 0
 
