@@ -5,7 +5,8 @@
 2. 分类回收   —— 按 GB/T 20811-2018 八大类拆分的回收量与估算货值（可选年份/区域）
 3. 历年回收   —— 2014—2025 年回收量、消费量、回收率、利用率
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
-5. 数据说明   —— 数据来源、口径与「官方 / 测算」区分，供复核
+5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
+6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
 """
 
 from io import BytesIO
@@ -15,7 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from . import regions
+from . import enterprises, regions
 from . import stats as stats_mod
 
 HEADER_FILL = PatternFill("solid", fgColor="2F7D4F")
@@ -178,10 +179,36 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "2021-01-01《关于全面禁止进口固体废物有关事项的公告》施行后，废纸进口清零。",
     )
 
-    # ---- 5. 数据说明 ----
-    ws5 = wb.create_sheet("数据说明")
-    ws5.append(["数据来源与口径说明"])
-    ws5.cell(row=1, column=1).font = TITLE_FONT
+    # ---- 5. 企业名录 ----
+    ws5 = wb.create_sheet("企业名录")
+    prov = None if is_national else node_code
+    ent_rows = []
+    for e in enterprises.list_enterprises(prov):
+        ent_rows.append([
+            e["name"], e["city"], e["type"],
+            "、".join(e["category_names"]),
+            e["volume"], e["lat"], e["lon"], e["note"],
+            "示例" if e["is_demo"] else "真实",
+        ])
+    ent_rows.append([
+        "合计", "", "", "",
+        round(sum(float(e["volume"]) for e in enterprises.list_enterprises(prov)), 1),
+        "", "", "", "",
+    ])
+    _write_sheet(
+        ws5, f"{scope_name} 回收企业名录",
+        ["企业名称", "城市", "类型", "主营大类", "年回收量(万吨)",
+         "纬度", "经度", "备注", "数据性质"],
+        ent_rows,
+        [30, 12, 16, 34, 16, 10, 10, 34, 10],
+        "企业维度用于回答「某个地方的量由谁在做、分布在哪些城市、各品类由哪类企业消化」。"
+        "内置名录为示例数据（虚构名称），可在项目根目录放 data/enterprises.csv 覆盖。",
+    )
+
+    # ---- 6. 数据说明 ----
+    ws6 = wb.create_sheet("数据说明")
+    ws6.append(["数据来源与口径说明"])
+    ws6.cell(row=1, column=1).font = TITLE_FONT
     lines = [
         "一、数据来源",
         *[f"  · {s}" for s in stats_mod.SOURCES],
@@ -190,6 +217,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 官方：中国造纸协会年度报告公布值，可直接引用。",
         "  · 公开报道：省级回收量来自行业研究机构公开报道。",
         "  · 梯队测算 / 估算：按行业分区梯队或结构占比推算，仅供结构参考，不可作为统计公报数据。",
+        "  · 示例：企业名录为演示用虚构数据，需替换为真实名录后使用。",
         "",
         "三、已知口径差异",
         "  · 2024 年全国废纸回收量：中国造纸协会年度报告 6971 万吨；"
@@ -197,18 +225,20 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 部分年份（2015、2017、2018）废纸消费量/利用率未在公开年报中单列，故留空。",
         "",
         "四、层级范围",
-        "  · 本工具只提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
+        "  · 本工具提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
+        "  · 企业名录带城市与经纬度，可在省级以下提供更细的空间视角，但企业样本不代表全量。",
         "",
         "五、替换为真实数据",
         "  · 省级：修改 src/paper_recycle_agent/regions.py 的 SEEDS，为省份填入 reported 值。",
         "  · 历年：修改 src/paper_recycle_agent/stats.py 的 HISTORY。",
         "  · 分类占比：修改 CATEGORY_SHARES 的锚点年份数值。",
+        "  · 企业名录：在项目根目录放 data/enterprises.csv（表头见 enterprises.CSV_FIELDS）。",
     ]
     for line in lines:
-        ws5.append([line])
-    ws5.column_dimensions["A"].width = 110
-    for r in range(2, ws5.max_row + 1):
-        ws5.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
+        ws6.append([line])
+    ws6.column_dimensions["A"].width = 110
+    for r in range(2, ws6.max_row + 1):
+        ws6.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
 
     buf = BytesIO()
     wb.save(buf)

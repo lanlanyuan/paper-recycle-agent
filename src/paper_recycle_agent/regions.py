@@ -223,20 +223,41 @@ def breadcrumb(code: str) -> List[Dict[str, str]]:
     return list(reversed(path))
 
 
+_SUFFIXES = ("壮族自治区", "回族自治区", "维吾尔自治区", "特别行政区", "自治区", "省", "市")
+
+
+def _short_name(name: str) -> str:
+    """「山东省」→「山东」，「广西壮族自治区」→「广西」，「中国香港」→「香港」。"""
+    text = name[2:] if name.startswith("中国") else name
+    for suf in _SUFFIXES:
+        if text.endswith(suf) and len(text) > len(suf):
+            return text[: -len(suf)]
+    return text
+
+
+# 简称 -> 节点，供「山东有哪些企业」这类自然语言命中
+_ALIAS: Dict[str, Dict[str, object]] = {}
+for _node in _INDEX.values():
+    _ALIAS.setdefault(str(_node["name"]), _node)
+    _ALIAS.setdefault(_short_name(str(_node["name"])), _node)
+
+
 def find(name: str) -> Optional[Dict[str, object]]:
-    """按名称查找区域：先精确匹配，再包含匹配（支持「山东」匹配「山东省」）。"""
+    """按名称查找区域：支持全称、简称，以及嵌在自然语言里的省名。
+
+    「山东」「山东省」「山东有哪些回收企业」都会命中山东省。
+    """
     if not name:
         return None
     text = str(name).strip()
     if text in {"全国", "中国", "国家", "cn", "CN"}:
         return ROOT
-    for node in _INDEX.values():
-        if node["name"] == text:
-            return node
-    for node in _INDEX.values():
-        n = str(node["name"])
-        if len(text) >= 2 and n and (text in n or n in text):
-            return node
+    if text in _ALIAS:
+        return _ALIAS[text]
+    # 长别名优先，避免「海南」先被「海」之类的短串抢走
+    for alias in sorted(_ALIAS, key=len, reverse=True):
+        if len(alias) >= 2 and alias in text:
+            return _ALIAS[alias]
     return None
 
 

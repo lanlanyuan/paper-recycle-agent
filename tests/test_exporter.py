@@ -13,7 +13,9 @@ def _load(code="CN", year=2024):
 
 def test_sheets_present():
     wb = _load()
-    assert wb.sheetnames == ["省级统计", "分类回收", "历年回收", "废纸进口", "数据说明"]
+    assert wb.sheetnames == [
+        "省级统计", "分类回收", "历年回收", "废纸进口", "企业名录", "数据说明"
+    ]
 
 
 def test_province_sheet_rows():
@@ -68,6 +70,20 @@ def test_notes_sheet_mentions_scope():
     text = "\n".join(str(ws.cell(row=r, column=1).value or "") for r in range(1, ws.max_row + 1))
     assert "市级、县级" in text
     assert "6971" in text
+
+
+def test_enterprise_sheet():
+    ws = _load()["企业名录"]
+    names = [ws.cell(row=r, column=1).value for r in range(4, ws.max_row + 1)]
+    assert "鲁清再生资源有限公司" in names
+    assert ws.cell(row=ws.max_row, column=1).value == "合计"
+
+
+def test_enterprise_sheet_scoped_to_province():
+    ws = _load("370000")["企业名录"]
+    cities = [ws.cell(row=r, column=2).value for r in range(4, ws.max_row + 1)]
+    assert "济南市" in cities
+    assert "广州市" not in cities
 
 
 def test_filename():

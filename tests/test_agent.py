@@ -70,3 +70,31 @@ def test_no_city_data_claim():
     """市级数据已下线，助手不应再声称能查市县。"""
     out = agent.respond("帮助")
     assert "仅全国与省级" in out
+
+
+def test_respond_enterprise_national():
+    out = agent.respond("企业名录")
+    assert "回收企业概览" in out
+    assert "示例" in out
+
+
+def test_respond_enterprise_by_province():
+    out = agent.respond("山东有哪些回收企业")
+    assert "山东" in out
+    assert "名录覆盖率" in out
+
+
+def test_respond_enterprise_by_name():
+    out = agent.respond("鲁清再生")
+    assert "鲁清再生资源有限公司" in out
+    assert "济南市" in out
+
+
+def test_respond_enterprise_type():
+    out = agent.respond("分拣中心")
+    assert "分拣打包中心" in out
+
+
+def test_help_mentions_enterprise():
+    out = agent.respond("帮助")
+    assert "企业名录" in out
