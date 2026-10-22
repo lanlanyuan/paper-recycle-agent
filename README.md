@@ -184,7 +184,7 @@ paper-recycle-agent/
 ├── config/llm.json.example    # 模型配置模板（复制为 llm.json，已被 gitignore）
 ├── data/enterprises.csv.example  # 企业名录模板
 ├── data/io_matrix.csv.example    # 投入产出矩阵导入格式（仅格式示例，非真实数据）
-├── tests/                     # pytest 单元测试（158 项）
+├── tests/                     # pytest 单元测试（159 项）
 ├── tools/                     # 代码清单 / 离线版构建 / Python 3.7 兼容性校验
 ├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出 + 模型代理）
 ├── app/static/index.html      # 界面（区域 / 历年 / 分类 / 企业 / 投入产出 / 地图 / 设置）
