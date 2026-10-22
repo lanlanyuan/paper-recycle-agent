@@ -1,5 +1,31 @@
 # 更新日志（CHANGELOG）
 
+## v1.5.0 (2026-10-23)
+**运行环境门槛下调：Python 下限从 3.9 降到 3.7，核心包彻底零依赖。**
+
+- `requires-python` 改为 `>=3.7`。全仓库唯一的版本门槛是 `dataclasses`（3.7 引入），
+  没有使用 walrus / `match` / `removeprefix` / `zoneinfo` 等更高版本的语法与 API
+- `openpyxl` 改为**按需导入**：以前它在模块顶层 import，导致没装 openpyxl 的机器
+  连 `import paper_recycle_agent` 都会失败；现在只有真正写工作簿时才加载
+  - 新增 `exporter.available()`，`build_workbook()` 在缺依赖时抛 `RuntimeError` 并附安装指引
+  - `/export.xlsx` 缺 openpyxl 时返回 **503 + JSON 说明**，不再是 500 堆栈
+  - 前端新增导出状态行：缺依赖时提前说明，导出失败不再静默下载一个 JSON 文件
+- `pyproject.toml` 拆分可选依赖：`[web]` / `[excel]` / `[test]` / `[all]`，核心 `dependencies = []`
+- 新增 `tools/check_compat.py`：用 3.7 语法树解析全部源码，并扫描 3.8/3.9 专有 API
+  与未启用 `from __future__ import annotations` 时的内置泛型注解，可接入 CI
+- `启动本地版.bat` 重写：
+  - 实测候选解释器能否执行 Python 代码，识破 Windows「微软商店跳转桩」（`python.exe` 只是跳转器）
+  - 按版本分流：3.8+ 起服务；3.7 打开零依赖离线版；无 Python 给出下载地址与离线版路径
+  - 离线版缺失时自动构建，不再只报错
+  - 新增 `--check` 只报告检测结果，便于排障
+  - 内容改为**纯 ASCII**：cmd.exe 按控制台代码页解析 `.bat`，UTF-8 中文会切断逻辑，
+    UTF-8 BOM 还会让 `@echo off` 失效（已实测）
+- `dist/paper-recycle-offline.html` 纳入版本库：它的卖点是「不装任何东西也能打开」，
+  若还需先装 Python 来生成就自相矛盾了
+- CI 改为 3.8 / 3.11 / 3.13 跑全量 + 独立 3.7 job 跑零依赖核心，并执行兼容性校验
+- `tests/test_exporter.py` 改用 `importorskip`，没装 openpyxl 时跳过而不是让整个套件崩掉
+- 测试从 101 项增至 111 项
+
 ## v1.4.0 (2026-10-22)
 - 新增 `enterprises.py`：企业维度（名称 / 城市 / 经纬度 / 类型 / 主营大类 / 年回收量）
   - 内置 30 家示例企业，覆盖 15 个省级行政区、4 种企业类型

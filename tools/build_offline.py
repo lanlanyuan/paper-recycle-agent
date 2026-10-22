@@ -14,6 +14,7 @@
 import json
 from pathlib import Path
 
+import paper_recycle_agent
 from paper_recycle_agent import data as yearbook
 from paper_recycle_agent import enterprises, knowledge, regions
 from paper_recycle_agent import stats as stats_mod
@@ -38,7 +39,7 @@ def build_payload() -> dict:
         })
 
     return {
-        "version": "1.4.0",
+        "version": paper_recycle_agent.__version__,
         "national": {
             "name": "全国",
             "year": regions.NATIONAL_YEAR,

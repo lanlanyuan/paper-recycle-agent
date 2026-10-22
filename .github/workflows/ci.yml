@@ -8,10 +8,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: ["3.9", "3.11"]
+        python-version: ["3.8", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +23,41 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check Python 3.7 compatibility
+        run: python tools/check_compat.py
+
       - name: Run tests
         env:
           PYTHONPATH: src
         run: pytest -q
+
+  # 核心包声明支持 3.7，但 FastAPI 0.110 起要求 3.8+，
+  # 所以 3.7 只跑「零依赖」的那部分：语法/API 下限 + 核心统计测试。
+  core-py37:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.7
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.7"
+
+      - name: Install pytest only (core has no runtime deps)
+        run: pip install pytest
+
+      - name: Check Python 3.7 compatibility
+        run: python tools/check_compat.py
+
+      - name: Run dependency-free tests
+        env:
+          PYTHONPATH: src
+        run: >
+          pytest -q
+          tests/test_classifier.py
+          tests/test_pricing.py
+          tests/test_data.py
+          tests/test_regions.py
+          tests/test_stats.py
+          tests/test_enterprises.py
+          tests/test_agent.py

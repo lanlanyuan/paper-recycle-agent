@@ -11,6 +11,7 @@
 """
 
 import io
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -77,6 +78,8 @@ def info() -> dict:
         "tiers": regions.TIER_LABEL,
         "enterprise_types": enterprises.TYPES,
         "enterprise_is_demo": enterprises.IS_DEMO,
+        "excel_available": exporter.available(),
+        "python_version": "{}.{}.{}".format(*sys.version_info[:3]),
     }
 
 
@@ -157,11 +160,23 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
 
 
 @app.get("/export.xlsx")
-def export(code: str = "CN", year: Optional[int] = None) -> StreamingResponse:
+def export(code: str = "CN", year: Optional[int] = None) -> Response:
     node = regions.get_node(code) or regions.get_node("CN")
     node_code = str(node["code"])  # type: ignore[index]
     if year is None:
         year = DEFAULT_YEAR
+
+    # openpyxl 是可选依赖：缺失时给出可读提示，而不是 500 堆栈
+    if not exporter.available():
+        return JSONResponse(
+            {
+                "detail": "当前服务未安装 openpyxl，无法生成 .xlsx。",
+                "hint": "执行 pip install openpyxl 后重启服务；"
+                        "或改用零依赖离线版 dist/paper-recycle-offline.html（自带 CSV 导出）。",
+            },
+            status_code=503,
+        )
+
     content = exporter.build_workbook(node_code, year)
     fname = exporter.filename(node_code, year)
     from urllib.parse import quote

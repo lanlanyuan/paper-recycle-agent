@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.4.0　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.5.0　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`5b931e1`
+- 生成时提交：`54c4c52`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -16,16 +16,29 @@
 
 ## 一、核心包（src/paper_recycle_agent）
 
-### `src/paper_recycle_agent/__init__.py`（20 行）
+### `src/paper_recycle_agent/__init__.py`（33 行）
 
 ```python
-"""废纸回收 Agent 对话助手。"""
+"""废纸回收 Agent 对话助手。
 
-from . import (agent, classifier, data, enterprises, exporter, knowledge,
+最低支持 Python 3.7（核心逻辑纯标准库，无需任何第三方依赖）。
+图形界面额外需要 Python 3.8+ 与 FastAPI；导出 Excel 额外需要 openpyxl。
+"""
+
+import sys
+
+if sys.version_info < (3, 7):  # pragma: no cover - 仅在旧解释器上触发
+    raise RuntimeError(
+        "paper_recycle_agent 需要 Python 3.7 或更高版本，当前为 {}.{}.{}。".format(
+            *sys.version_info[:3]
+        )
+    )
+
+from . import (agent, classifier, data, enterprises, exporter, knowledge,  # noqa: E402
                pricing, regions, stats)
-from .agent import respond
+from .agent import respond  # noqa: E402
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 __all__ = [
     "agent",
@@ -822,7 +835,7 @@ def summary(province: Optional[str] = None) -> str:
     return "\n".join(lines)
 ```
 
-### `src/paper_recycle_agent/exporter.py`（250 行）
+### `src/paper_recycle_agent/exporter.py`（301 行）
 
 ```python
 """Excel 导出：面向统计局/行业协会的多表工作簿。
@@ -834,36 +847,81 @@ def summary(province: Optional[str] = None) -> str:
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
 5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
 6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
+
+依赖策略
+--------
+openpyxl 只在真正要写工作簿时才导入。这样即使机器上没装 openpyxl，
+`import paper_recycle_agent`、命令行对话、离线 HTML 版都能正常工作，
+只有点击「导出 Excel」时才会提示安装。
 """
 
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-
 from . import enterprises, regions
 from . import stats as stats_mod
 
-HEADER_FILL = PatternFill("solid", fgColor="2F7D4F")
-HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
-TITLE_FONT = Font(bold=True, size=13, color="1F2329")
-NOTE_FONT = Font(size=10, color="6B7280")
-THIN = Side(style="thin", color="D9D9D9")
-BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+_INSTALL_HINT = (
+    "导出 Excel 需要 openpyxl，但当前环境没有安装。\n"
+    "请执行：pip install openpyxl\n"
+    "若无法联网安装，可改用「零依赖离线版」：dist/paper-recycle-offline.html，"
+    "其中自带 CSV 导出，可直接用 Excel 打开。"
+)
+
+# 惰性构造的样式缓存，避免在模块导入期就依赖 openpyxl
+_STYLE_CACHE: Dict[str, object] = {}
+
+
+def available() -> bool:
+    """当前环境是否具备导出 Excel 的能力。"""
+    try:
+        import openpyxl  # noqa: F401
+    except Exception:  # pragma: no cover - 取决于运行环境
+        return False
+    return True
+
+
+def _require_openpyxl():
+    """导入 openpyxl，失败时抛出带安装指引的异常。"""
+    try:
+        import openpyxl
+    except Exception as exc:  # pragma: no cover - 取决于运行环境
+        raise RuntimeError(_INSTALL_HINT) from exc
+    return openpyxl
+
+
+def _styles() -> Dict[str, object]:
+    """首次调用时构造样式对象并缓存。"""
+    if _STYLE_CACHE:
+        return _STYLE_CACHE
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    thin = Side(style="thin", color="D9D9D9")
+    _STYLE_CACHE.update({
+        "header_fill": PatternFill("solid", fgColor="2F7D4F"),
+        "header_font": Font(color="FFFFFF", bold=True, size=11),
+        "title_font": Font(bold=True, size=13, color="1F2329"),
+        "note_font": Font(size=10, color="6B7280"),
+        "border": Border(left=thin, right=thin, top=thin, bottom=thin),
+        "center": Alignment(horizontal="center", vertical="center", wrap_text=True),
+        "left": Alignment(wrap_text=False, vertical="center"),
+    })
+    return _STYLE_CACHE
 
 
 def _style_header(ws, row: int, ncols: int) -> None:
+    st = _styles()
     for col in range(1, ncols + 1):
         cell = ws.cell(row=row, column=col)
-        cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = BORDER
+        cell.fill = st["header_fill"]
+        cell.font = st["header_font"]
+        cell.alignment = st["center"]
+        cell.border = st["border"]
 
 
 def _autofit(ws, widths: List[int]) -> None:
+    from openpyxl.utils import get_column_letter
+
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
@@ -871,11 +929,12 @@ def _autofit(ws, widths: List[int]) -> None:
 def _write_sheet(ws, title: str, headers: List[str], rows: List[List[object]],
                  widths: List[int], note: Optional[str] = None) -> None:
     """统一的「标题 + 表头 + 数据 + 备注」写入。"""
+    st = _styles()
     ws.append([title])
-    ws.cell(row=1, column=1).font = TITLE_FONT
+    ws.cell(row=1, column=1).font = st["title_font"]
     if note:
         ws.append([note])
-        ws.cell(row=2, column=1).font = NOTE_FONT
+        ws.cell(row=2, column=1).font = st["note_font"]
         header_row = 3
     else:
         header_row = 2
@@ -885,7 +944,7 @@ def _write_sheet(ws, title: str, headers: List[str], rows: List[List[object]],
         ws.append(row)
     for r in range(header_row + 1, ws.max_row + 1):
         for c in range(1, len(headers) + 1):
-            ws.cell(row=r, column=c).border = BORDER
+            ws.cell(row=r, column=c).border = st["border"]
     ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
     _autofit(ws, widths)
 
@@ -911,13 +970,18 @@ def _province_rows() -> List[List[object]]:
 
 
 def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes:
-    """生成多表工作簿，返回 .xlsx 字节流。"""
+    """生成多表工作簿，返回 .xlsx 字节流。
+
+    :raises RuntimeError: 环境缺少 openpyxl 时，异常信息含安装指引。
+    """
+    openpyxl = _require_openpyxl()
+
     node = regions.get_node(code) or regions.ROOT
     node_code = str(node["code"])
     is_national = node["level"] == "national"
     scope_name = str(node["name"])
 
-    wb = Workbook()
+    wb = openpyxl.Workbook()
 
     # ---- 1. 省级统计 ----
     ws1 = wb.active
@@ -1035,7 +1099,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
     # ---- 6. 数据说明 ----
     ws6 = wb.create_sheet("数据说明")
     ws6.append(["数据来源与口径说明"])
-    ws6.cell(row=1, column=1).font = TITLE_FONT
+    ws6.cell(row=1, column=1).font = _styles()["title_font"]
     lines = [
         "一、数据来源",
         *[f"  · {s}" for s in stats_mod.SOURCES],
@@ -1065,7 +1129,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         ws6.append([line])
     ws6.column_dimensions["A"].width = 110
     for r in range(2, ws6.max_row + 1):
-        ws6.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
+        ws6.cell(row=r, column=1).alignment = _styles()["left"]
 
     buf = BytesIO()
     wb.save(buf)
@@ -1810,7 +1874,7 @@ SOURCES: List[str] = [
 
 ## 二、Web 应用（app/）
 
-### `app/server.py`（205 行）
+### `app/server.py`（220 行）
 
 ```python
 """FastAPI 服务：废纸回收 Agent 的图形界面与对话接口。
@@ -1826,6 +1890,7 @@ SOURCES: List[str] = [
 """
 
 import io
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -1892,6 +1957,8 @@ def info() -> dict:
         "tiers": regions.TIER_LABEL,
         "enterprise_types": enterprises.TYPES,
         "enterprise_is_demo": enterprises.IS_DEMO,
+        "excel_available": exporter.available(),
+        "python_version": "{}.{}.{}".format(*sys.version_info[:3]),
     }
 
 
@@ -1972,11 +2039,23 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
 
 
 @app.get("/export.xlsx")
-def export(code: str = "CN", year: Optional[int] = None) -> StreamingResponse:
+def export(code: str = "CN", year: Optional[int] = None) -> Response:
     node = regions.get_node(code) or regions.get_node("CN")
     node_code = str(node["code"])  # type: ignore[index]
     if year is None:
         year = DEFAULT_YEAR
+
+    # openpyxl 是可选依赖：缺失时给出可读提示，而不是 500 堆栈
+    if not exporter.available():
+        return JSONResponse(
+            {
+                "detail": "当前服务未安装 openpyxl，无法生成 .xlsx。",
+                "hint": "执行 pip install openpyxl 后重启服务；"
+                        "或改用零依赖离线版 dist/paper-recycle-offline.html（自带 CSV 导出）。",
+            },
+            status_code=503,
+        )
+
     content = exporter.build_workbook(node_code, year)
     fname = exporter.filename(node_code, year)
     from urllib.parse import quote
@@ -2020,7 +2099,7 @@ def spa_fallback(full_path: str) -> Response:
     return _index_html()
 ```
 
-### `app/static/index.html`（792 行）
+### `app/static/index.html`（833 行）
 
 ```html
 <!DOCTYPE html>
@@ -2132,6 +2211,8 @@ def spa_fallback(full_path: str) -> Response:
                     border: 1px solid var(--border); background: #fff; color: var(--ink); }
   .actions #exportBtn { background: var(--brand); color: #fff; border-color: var(--brand); }
   .actions button:disabled { opacity: .6; cursor: default; }
+  .export-msg { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 2px 2px 0; min-height: 15px; }
+  .export-msg.err { color: #C0392B; }
 
   .yearbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
   .yearbar select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; color: var(--ink); background: #fff; }
@@ -2148,7 +2229,7 @@ def spa_fallback(full_path: str) -> Response:
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.4.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.5.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -2198,6 +2279,7 @@ def spa_fallback(full_path: str) -> Response:
         <button id="backBtn" onclick="goBack()">返回全国</button>
         <button id="exportBtn" onclick="exportExcel()">导出 Excel</button>
       </div>
+      <div class="export-msg" id="exportMsg"></div>
     </section>
 
     <!-- 历年数据 -->
@@ -2662,13 +2744,37 @@ def spa_fallback(full_path: str) -> Response:
 
   /* ---------------- Excel 导出 ---------------- */
   async function exportExcel() {
-    const btns = [document.getElementById("exportBtn")].filter(Boolean);
-    const label = btns.length ? btns[0].textContent : "";
-    btns.forEach(b => { b.disabled = true; b.textContent = "导出中…"; });
+    const btn = document.getElementById("exportBtn");
+    const msg = document.getElementById("exportMsg");
+    const label = btn ? btn.textContent : "导出 Excel";
+    const say = (text, isErr) => {
+      if (!msg) return;
+      msg.textContent = text || "";
+      msg.classList.toggle("err", !!isErr);
+    };
+    const restore = (text) => {
+      if (!btn) return;
+      btn.textContent = text;
+      btn.disabled = false;
+    };
+    if (btn) { btn.disabled = true; btn.textContent = "导出中…"; }
+    say("");
     const url = `/export.xlsx?code=${encodeURIComponent(state.code)}&year=${state.year}`;
+    let serverReplied = false;
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error("HTTP " + res.status);
+      serverReplied = true;
+      if (!res.ok) {
+        // 服务端会用 JSON 说明原因（例如缺少 openpyxl 时返回 503）
+        let detail = `导出失败（HTTP ${res.status}）`;
+        let hint = "";
+        try {
+          const body = await res.json();
+          if (body && body.detail) detail = body.detail;
+          if (body && body.hint) hint = body.hint;
+        } catch (_) { /* 非 JSON 响应，保留默认文案 */ }
+        throw new Error(hint ? `${detail} ${hint}` : detail);
+      }
       const blob = await res.blob();
       const name = `废纸回收统计_${(state.data && state.data.node.name) || "全国"}_${state.year}.xlsx`;
       const obj = URL.createObjectURL(blob);
@@ -2679,16 +2785,19 @@ def spa_fallback(full_path: str) -> Response:
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(obj), 4000);
-      btns.forEach(b => { b.textContent = "已导出 ✓"; });
-      setTimeout(() => {
-        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
-      }, 1600);
+      say(`已导出 ${name}（6 张工作表）`);
+      restore("已导出 ✓");
+      setTimeout(() => restore(label || "导出 Excel"), 1600);
     } catch (e) {
-      window.open(url, "_blank");
-      btns.forEach(b => { b.textContent = "已打开下载"; });
-      setTimeout(() => {
-        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
-      }, 1600);
+      if (!serverReplied) {
+        // 请求根本没到服务端（预览框拦截 / 网络异常），退化为直接打开下载链接
+        window.open(url, "_blank");
+        say("已尝试在新窗口打开下载链接");
+      } else {
+        say(e.message, true);
+      }
+      restore("导出失败");
+      setTimeout(() => restore(label || "导出 Excel"), 2400);
     }
   }
 
@@ -2706,6 +2815,17 @@ def spa_fallback(full_path: str) -> Response:
                        <div class="nt">${c.note}</div>`;
         box.appendChild(d);
       });
+      // 缺少 openpyxl 时提前说明，避免用户点了导出才看到失败
+      if (info.excel_available === false) {
+        const btn = document.getElementById("exportBtn");
+        const msg = document.getElementById("exportMsg");
+        if (btn) btn.title = "服务端未安装 openpyxl，导出会失败";
+        if (msg) {
+          msg.textContent = "服务端未安装 openpyxl，暂时无法导出 .xlsx。"
+            + "执行 pip install openpyxl 后重启服务即可；或改用离线版（自带 CSV 导出）。";
+          msg.classList.add("err");
+        }
+      }
     } catch (e) { /* ignore */ }
   }
 
@@ -2958,6 +3078,182 @@ def test_list_categories_nonempty():
     assert any(c["recyclable"] for c in cats)
 ```
 
+### `tests/test_compat.py`（171 行）
+
+```python
+"""版本兼容性与可选依赖测试。
+
+这套测试锁死两件事：
+1. 仓库代码的语法/API 不超出 Python 3.7（由 tools/check_compat.py 实际执行）；
+2. 没装 openpyxl 时，核心包仍能导入、命令行仍能用、导出接口给出可读提示。
+
+两者都是「本机装了什么」之外的真实约束，因此必须由测试而不是文档来保证。
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+TOOL = ROOT / "tools" / "check_compat.py"
+
+
+def _run(args, env_extra=None):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + str(ROOT)
+    env["PYTHONIOENCODING"] = "utf-8"
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, *args],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=False,
+    )
+
+
+# ---------------------------------------------------------------- 版本下限
+
+
+def test_compat_tool_passes():
+    """全仓库语法与 API 不超出 Python 3.7。"""
+    proc = _run([str(TOOL)])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "结果：通过" in proc.stdout
+
+
+def test_compat_tool_detects_violation():
+    """校验器本身必须能报错，否则它只是装饰。"""
+    bad = ROOT / "tools" / "_tmp_bad_compat.py"
+    bad.write_text(
+        "def bad(x: str) -> list[str]:\n"
+        "    return x.removeprefix('a').split()\n",
+        encoding="utf-8",
+    )
+    try:
+        proc = _run([str(TOOL)])
+        assert proc.returncode == 1
+        assert "removeprefix" in proc.stdout
+        assert "list[...]" in proc.stdout
+    finally:
+        bad.unlink(missing_ok=True)
+
+
+def test_pyproject_requires_python_37():
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'requires-python = ">=3.7"' in text
+
+
+def test_pyproject_declares_optional_groups():
+    """核心零依赖，Web / Excel 作为 extras 声明。"""
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:  # pragma: no cover
+        pytest.skip("需要 tomllib 解析 pyproject")
+    meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = meta["project"]
+    assert project.get("dependencies", []) == []
+    extras = project["optional-dependencies"]
+    for key in ("web", "excel", "test"):
+        assert key in extras
+
+
+def test_package_version_matches_pyproject():
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover
+        pytest.skip("需要 tomllib 解析 pyproject")
+    import paper_recycle_agent
+
+    meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert meta["project"]["version"] == paper_recycle_agent.__version__
+
+
+# ------------------------------------------------------- 缺少 openpyxl 的场景
+
+
+def _block_openpyxl(code: str) -> str:
+    """在子进程里把 openpyxl 屏蔽掉，再执行 code。"""
+    prelude = "import sys; sys.modules['openpyxl'] = None\n"
+    return prelude + code
+
+
+def test_core_imports_without_openpyxl():
+    proc = _run(["-c", _block_openpyxl(
+        "import paper_recycle_agent as p; print(p.__version__)"
+    )])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip()
+
+
+def test_cli_works_without_openpyxl():
+    proc = _run(["-c", _block_openpyxl(
+        "from paper_recycle_agent import cli, stats; "
+        "print(stats.history_summary()[:40]); "
+        "assert cli.main(['history']) == 0"
+    )])
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_exporter_available_reflects_missing_dependency():
+    from paper_recycle_agent import exporter
+
+    assert exporter.available() is True
+
+    saved = sys.modules.get("openpyxl")
+    sys.modules["openpyxl"] = None
+    try:
+        assert exporter.available() is False
+        with pytest.raises(RuntimeError) as exc:
+            exporter.build_workbook()
+        assert "pip install openpyxl" in str(exc.value)
+    finally:
+        if saved is None:
+            sys.modules.pop("openpyxl", None)
+        else:
+            sys.modules["openpyxl"] = saved
+
+
+def test_export_endpoint_503_without_openpyxl():
+    pytest.importorskip("httpx", reason="TestClient 依赖 httpx")
+    from fastapi.testclient import TestClient
+
+    from app.server import app
+
+    client = TestClient(app)
+    saved = sys.modules.get("openpyxl")
+    sys.modules["openpyxl"] = None
+    try:
+        res = client.get("/export.xlsx")
+        assert res.status_code == 503
+        body = res.json()
+        assert "openpyxl" in body["detail"]
+        assert "离线版" in body["hint"]
+    finally:
+        if saved is None:
+            sys.modules.pop("openpyxl", None)
+        else:
+            sys.modules["openpyxl"] = saved
+
+
+def test_info_reports_python_and_excel_capability():
+    pytest.importorskip("httpx", reason="TestClient 依赖 httpx")
+    from fastapi.testclient import TestClient
+
+    from app.server import app
+
+    body = TestClient(app).get("/api/info").json()
+    assert body["excel_available"] is True
+    assert body["python_version"].count(".") == 2
+```
+
 ### `tests/test_data.py`（24 行）
 
 ```python
@@ -3091,14 +3387,19 @@ def test_province_volume_not_exceed_official():
         assert float(row["volume"]) <= official, f"{node['name']} 企业量超过官方回收量"
 ```
 
-### `tests/test_exporter.py`（96 行）
+### `tests/test_exporter.py`（101 行）
 
 ```python
 import io
 
-from openpyxl import load_workbook
+import pytest
 
-from paper_recycle_agent import exporter, regions
+# openpyxl 是可选依赖：没装的机器上跳过本文件，而不是让整个测试套件崩掉
+pytest.importorskip("openpyxl", reason="导出测试需要 openpyxl")
+
+from openpyxl import load_workbook  # noqa: E402
+
+from paper_recycle_agent import exporter, regions  # noqa: E402
 
 
 def _load(code="CN", year=2024):
@@ -3566,7 +3867,7 @@ for path in (ROOT, ROOT / "src"):
         sys.path.insert(0, entry)
 ```
 
-### `pyproject.toml`（19 行）
+### `pyproject.toml`（44 行）
 
 ```toml
 [build-system]
@@ -3575,13 +3876,38 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.4.0"
+version = "1.5.0"
 description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
-requires-python = ">=3.9"
+# 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
+requires-python = ">=3.7"
 license = { text = "MIT" }
 authors = [{ name = "梁湘瑶 / 阿岩" }]
 keywords = ["recycling", "paper", "agent", "cli"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+# 核心零依赖；下面按需安装
+dependencies = []
+
+[project.optional-dependencies]
+# 图形界面 / HTTP 服务。FastAPI 0.110 起要求 Python 3.8+，
+# 因此 3.7 环境请改用零依赖离线版 dist/paper-recycle-offline.html
+web = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# 导出 .xlsx 工作簿
+excel = ["openpyxl>=3.1"]
+# 本地测试
+test = ["pytest>=7.0"]
+all = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "openpyxl>=3.1", "pytest>=7.0"]
 
 [project.scripts]
 paper-recycle-agent = "paper_recycle_agent.cli:main"
@@ -3590,16 +3916,21 @@ paper-recycle-agent = "paper_recycle_agent.cli:main"
 where = ["src"]
 ```
 
-### `requirements.txt`（7 行）
+### `requirements.txt`（12 行）
 
 ```text
-# 运行时依赖：无（核心包仅使用 Python 标准库）
-# 开发 / 测试 / 图形界面依赖见下方注释
-pytest>=7.0          # 单元测试（CI 使用）
-fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
+# 核心包 paper_recycle_agent 零依赖，只用 Python 标准库。
+# 本文件是「图形界面 + Excel 导出 + 测试」的完整依赖集，等价于：pip install .[all]
+#
+# 只要命令行 / 离线版？什么都不用装：
+#   PYTHONPATH=src python -m paper_recycle_agent.cli history
+#   python tools/build_offline.py     # 生成 dist/paper-recycle-offline.html
+
+fastapi>=0.110       # 图形界面 / HTTP 服务（FastAPI 0.110 要求 Python 3.8+）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
-openpyxl>=3.1        # 导出 Excel（/export.xlsx）
 httpx>=0.27          # Web 路由测试（fastapi.testclient 依赖）
+openpyxl>=3.1        # 导出 Excel（可选：缺失时 /export.xlsx 返回 503 并给出安装提示）
+pytest>=7.0          # 单元测试（CI 使用）
 ```
 
 ### `data/enterprises.csv.example`（3 行）
@@ -3610,7 +3941,7 @@ E001,某某再生资源有限公司,370000,济南市,分拣打包中心,1;8,26.0
 E002,某某纸业原料部,440000,东莞市,造纸企业,1,55.0,23.02,113.75,示例：请替换为真实企业
 ```
 
-### `.github/workflows/ci.yml`（29 行）
+### `.github/workflows/ci.yml`（63 行）
 
 ```yaml
 name: CI
@@ -3623,10 +3954,10 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: ["3.9", "3.11"]
+        python-version: ["3.8", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
@@ -3638,15 +3969,49 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check Python 3.7 compatibility
+        run: python tools/check_compat.py
+
       - name: Run tests
         env:
           PYTHONPATH: src
         run: pytest -q
+
+  # 核心包声明支持 3.7，但 FastAPI 0.110 起要求 3.8+，
+  # 所以 3.7 只跑「零依赖」的那部分：语法/API 下限 + 核心统计测试。
+  core-py37:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.7
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.7"
+
+      - name: Install pytest only (core has no runtime deps)
+        run: pip install pytest
+
+      - name: Check Python 3.7 compatibility
+        run: python tools/check_compat.py
+
+      - name: Run dependency-free tests
+        env:
+          PYTHONPATH: src
+        run: >
+          pytest -q
+          tests/test_classifier.py
+          tests/test_pricing.py
+          tests/test_data.py
+          tests/test_regions.py
+          tests/test_stats.py
+          tests/test_enterprises.py
+          tests/test_agent.py
 ```
 
 ## 五、工具脚本（tools/）
 
-### `tools/build_offline.py`（671 行）
+### `tools/build_offline.py`（672 行）
 
 ```python
 """生成离线单文件版：dist/paper-recycle-offline.html
@@ -3665,6 +4030,7 @@ jobs:
 import json
 from pathlib import Path
 
+import paper_recycle_agent
 from paper_recycle_agent import data as yearbook
 from paper_recycle_agent import enterprises, knowledge, regions
 from paper_recycle_agent import stats as stats_mod
@@ -3689,7 +4055,7 @@ def build_payload() -> dict:
         })
 
     return {
-        "version": "1.4.0",
+        "version": paper_recycle_agent.__version__,
         "national": {
             "name": "全国",
             "year": regions.NATIONAL_YEAR,
@@ -4322,7 +4688,186 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-### `tools/gen_code_listing.py`（127 行）
+### `tools/check_compat.py`（174 行）
+
+```python
+"""Python 版本兼容性检查：确保仓库代码能在 Python 3.7 上运行。
+
+用法：
+    python tools/check_compat.py
+
+检查三件事：
+1. 语法 —— 用 3.7 的语法规则解析每个 .py 文件（ast.parse 的 feature_version）
+2. 运行时 API —— 扫描 3.8 / 3.9 才引入的标准库函数与模块
+3. 类型注解 —— 未启用 `from __future__ import annotations` 时，
+   禁止在注解里使用 list[str] / dict[str, int] 这类内置泛型（3.9+ 才支持）
+
+任一项不通过则以退出码 1 结束，便于接入 CI。
+"""
+
+from __future__ import annotations
+
+import ast
+import sys
+from pathlib import Path
+from typing import List, Tuple
+
+ROOT = Path(__file__).resolve().parent.parent
+TARGET = (3, 7)
+
+SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "dist", ".venv", "venv", "build"}
+
+# 3.8 / 3.9 才引入、且名字足够独特不容易误判的运行时 API
+BLOCKED_ATTRS = {
+    "removeprefix": "3.9",
+    "removesuffix": "3.9",
+    "is_relative_to": "3.9",
+    "with_stem": "3.9",
+    "cached_property": "3.8",
+}
+BLOCKED_MODULES = {
+    "zoneinfo": "3.9",
+    "graphlib": "3.9",
+}
+BLOCKED_FROM = {
+    ("functools", "cache"): "3.9",
+    ("importlib", "metadata"): "3.8",
+    ("typing", "Protocol"): "3.8",
+    ("typing", "Literal"): "3.8",
+    ("typing", "Final"): "3.8",
+    ("typing", "TypedDict"): "3.8",
+}
+BUILTIN_GENERICS = {"list", "dict", "set", "tuple", "frozenset", "type"}
+
+
+def _iter_py_files() -> List[Path]:
+    out: List[Path] = []
+    for path in sorted(ROOT.rglob("*.py")):
+        if any(part in SKIP_DIRS for part in path.relative_to(ROOT).parts):
+            continue
+        out.append(path)
+    return out
+
+
+def _has_future_annotations(tree: ast.AST) -> bool:
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            if any(a.name == "annotations" for a in node.names):
+                return True
+    return False
+
+
+def _annotation_nodes(tree: ast.AST) -> List[ast.AST]:
+    """收集所有类型注解节点。"""
+    out: List[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and node.annotation is not None:
+            out.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.returns is not None:
+                out.append(node.returns)
+            for arg in list(node.args.args) + list(node.args.kwonlyargs):
+                if arg.annotation is not None:
+                    out.append(arg.annotation)
+            if node.args.vararg is not None and node.args.vararg.annotation:
+                out.append(node.args.vararg.annotation)
+            if node.args.kwarg is not None and node.args.kwarg.annotation:
+                out.append(node.args.kwarg.annotation)
+    return out
+
+
+def check_file(path: Path) -> List[str]:
+    problems: List[str] = []
+    rel = path.relative_to(ROOT).as_posix()
+    source = path.read_text(encoding="utf-8")
+
+    # 1. 语法
+    if sys.version_info >= (3, 8):
+        try:
+            ast.parse(source, filename=str(path), feature_version=TARGET)
+        except SyntaxError as exc:
+            problems.append(
+                "{}:{}: 语法超出 Python {}.{}：{}".format(
+                    rel, exc.lineno or 0, TARGET[0], TARGET[1], exc.msg
+                )
+            )
+            return problems  # 语法不过，后续 AST 检查无意义
+
+    tree = ast.parse(source, filename=str(path))
+
+    # 2. 运行时 API
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in BLOCKED_ATTRS:
+            problems.append(
+                "{}:{}: `.{}` 需要 Python {}，本仓库下限为 {}.{}".format(
+                    rel, getattr(node, "lineno", 0), node.attr,
+                    BLOCKED_ATTRS[node.attr], TARGET[0], TARGET[1],
+                )
+            )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in BLOCKED_MODULES:
+                    problems.append(
+                        "{}:{}: `import {}` 需要 Python {}".format(
+                            rel, getattr(node, "lineno", 0), alias.name,
+                            BLOCKED_MODULES[top],
+                        )
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                key = (node.module or "", alias.name)
+                if key in BLOCKED_FROM:
+                    problems.append(
+                        "{}:{}: `from {} import {}` 需要 Python {}".format(
+                            rel, getattr(node, "lineno", 0),
+                            node.module, alias.name, BLOCKED_FROM[key],
+                        )
+                    )
+
+    # 3. 注解里的内置泛型
+    if not _has_future_annotations(tree):
+        for ann in _annotation_nodes(tree):
+            for sub in ast.walk(ann):
+                if isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Name):
+                    if sub.value.id in BUILTIN_GENERICS:
+                        problems.append(
+                            "{}:{}: 注解 `{}[...]` 需要 Python 3.9，"
+                            "请改用 typing.{} 或加 `from __future__ import annotations`".format(
+                                rel, getattr(sub, "lineno", 0), sub.value.id,
+                                sub.value.id.capitalize(),
+                            )
+                        )
+    return problems
+
+
+def main() -> int:
+    files = _iter_py_files()
+    problems: List[str] = []
+    for path in files:
+        problems.extend(check_file(path))
+
+    print("Python 兼容性检查（目标下限 {}.{}）".format(*TARGET))
+    print("-" * 46)
+    print("扫描文件：{} 个".format(len(files)))
+    if problems:
+        print("发现 {} 处不兼容：".format(len(problems)))
+        for p in problems:
+            print("  · " + p)
+        print("\n结果：不通过")
+        return 1
+    print("语法（3.7 语法树）：OK")
+    print("运行时 API（3.8 / 3.9 专有）：OK")
+    print("类型注解（内置泛型）：OK")
+    print("\n结果：通过")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+### `tools/gen_code_listing.py`（128 行）
 
 ```python
 """生成 docs/CODE_LISTING.md：把全部源码嵌入一份独立的代码清单文档。
@@ -4340,6 +4885,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from typing import List
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "CODE_LISTING.md"
@@ -4383,7 +4929,7 @@ def _version() -> str:
     return "unknown"
 
 
-def _files(path: Path, recursive: bool) -> list[Path]:
+def _files(path: Path, recursive: bool) -> List[Path]:
     if path.is_file():
         return [path]
     pattern = "**/*" if recursive else "*"
@@ -4413,7 +4959,7 @@ def _git(*args: str) -> str:
 
 
 def main() -> int:
-    parts: list[str] = []
+    parts: List[str] = []
     version = _version()
     parts.append(
         "# 代码清单\n\n"
@@ -4456,4 +5002,4 @@ if __name__ == "__main__":
 
 ---
 
-共收录 30 个文件。
+共收录 32 个文件。
