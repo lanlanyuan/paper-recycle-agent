@@ -23,6 +23,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("history", help="历年回收量 / 回收率 / 利用率")
     cs = sub.add_parser("catstats", help="按八大类拆分回收量")
     cs.add_argument("year", type=int, nargs="?", default=stats_mod.LATEST_YEAR)
+    en = sub.add_parser("enterprises", help="企业名录（可按省 / 类型筛选）")
+    en.add_argument("--province", default=None, help="省名，如 山东")
+    en.add_argument("--type", dest="etype", default=None, help="企业类型")
     rg = sub.add_parser("region", help="区域统计（全国 / 省级）")
     rg.add_argument("name", nargs="?", default="全国")
     ex = sub.add_parser("export", help="导出 Excel")
@@ -50,6 +53,18 @@ def main(argv=None) -> int:
         print(stats_mod.history_summary())
     elif args.cmd == "catstats":
         print(stats_mod.category_summary(args.year))
+    elif args.cmd == "enterprises":
+        from . import enterprises as ent_mod
+
+        node = regions.find(args.province) if args.province else None
+        code = str(node["code"]) if node and node["level"] == "province" else None
+        if args.etype:
+            rows = ent_mod.list_enterprises(code, None, args.etype)
+            for e in rows:
+                print(f"- {e['name']}（{e['city']}·{e['type']}）{e['volume']} 万吨")
+            print(f"共 {len(rows)} 家")
+        else:
+            print(ent_mod.summary(code))
     elif args.cmd == "region":
         node = regions.find(args.name)
         print(regions.summary(str(node["code"]) if node else "CN"))
@@ -60,7 +75,7 @@ def main(argv=None) -> int:
         content = exporter.build_workbook(str(node["code"]), args.year)
         with open(args.out, "wb") as fh:
             fh.write(content)
-        print(f"已导出：{args.out}（{len(content)} 字节，5 张工作表）")
+        print(f"已导出：{args.out}（{len(content)} 字节，6 张工作表）")
     else:
         _chat_loop()
     return 0
