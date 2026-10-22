@@ -4,15 +4,14 @@
 
 ## 项目简介
 
-一个纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估价，并接入《中国造纸年鉴》/行业报告的废纸分类（GB/T 20811-2018）与行业数据，提供命令行与 Web 图形界面（FastAPI + 聊天页）。
+纯标准库实现的废纸回收助手：分类、估价、对话；接入《中国造纸年鉴》/行业报告数据；支持国家→省→市→县区四级区域统计、Excel 导出、Web 图形界面与语音输入。
 
 ## 如何运行
 
 ```bash
 pip install -r requirements.txt
 PYTHONPATH=src pytest -q            # 跑测试
-PYTHONPATH=src python -m paper_recycle_agent.cli chat   # 命令行
-uvicorn app.server:app --reload      # 图形界面 http://localhost:8000
+python run.py                        # 图形界面 http://localhost:8000
 ```
 
 ## 项目元信息
@@ -28,7 +27,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.0.0"
+version = "1.1.0"
 description = "废纸回收 Agent 对话助手：分类、估价与交互（纯标准库）"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -53,6 +52,7 @@ _requirements.txt_
 pytest>=7.0          # 单元测试（CI 使用）
 fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
+openpyxl>=3.1        # 导出 Excel（/export.xlsx）
 ```
 
 ### .github/workflows/ci.yml
@@ -83,12 +83,42 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install pytest
+        run: pip install -r requirements.txt
 
       - name: Run tests
         env:
           PYTHONPATH: src
         run: pytest -q
+```
+
+## 启动入口
+
+### run.py（读取 PORT 启动）
+
+_run.py_
+
+```python
+"""统一启动入口：读取 PORT 环境变量并启动 FastAPI 服务。
+
+本地：python run.py            （默认 8000）
+部署：平台注入 PORT，python run.py
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# 让 src/ 下的核心包可被导入
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+import uvicorn  # noqa: E402
+
+from app.server import app as fastapi_app  # noqa: E402
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
 ```
 
 ## 核心包 src/paper_recycle_agent
@@ -103,7 +133,7 @@ _src/paper_recycle_agent/__init__.py_
 from . import agent, classifier, knowledge, pricing
 from .agent import respond
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = ["agent", "classifier", "knowledge", "pricing", "respond"]
 ```
@@ -335,6 +365,365 @@ def summary_text() -> str:
     return "\n".join(lines)
 ```
 
+### regions.py（国家→省→市→县区统计）
+
+_src/paper_recycle_agent/regions.py_
+
+```text
+"""行政区划分层统计：国家 → 省 → 市 → 县区。
+
+数据口径（务必注意）：
+- 国家级：中国造纸协会《中国造纸工业2024年度报告》官方数据。
+- 省/市/县三级：**分层测算**（按区域权重从国家总量分摊，确定性生成），
+  用于演示层级统计、下钻与 Excel 导出；真实统计可通过替换 `_RAW` 或导入 JSON 覆盖。
+  每条数据带 `provenance` 字段，标明「官方」或「分层测算」。
+
+层级：national(国家) → province(省) → city(市) → county(县区)。
+"""
+
+import zlib
+from typing import Dict, List, Optional
+
+# 官方口径（国家级）
+NATIONAL_STATS: Dict[str, float] = {
+    "回收量(万吨)": 6971.0,
+    "纸及纸板产量(万吨)": 13625.0,
+    "回收率(%)": 51.1,
+    "利用率(%)": 51.6,
+    "回收企业数(家)": 4200,
+    "从业人员(人)": 620000,
+}
+
+PROVENANCE_OFFICIAL = "官方（中国造纸协会《中国造纸工业2024年度报告》）"
+PROVENANCE_MODEL = "分层测算（按区域权重分摊，演示用，可替换为真实统计）"
+
+# (省名, 省级代码, 权重, [(市名, [县区名, ...]), ...])
+_RAW = [
+    ("广东省", "440000", 0.115, [
+        ("广州市", ["荔湾区", "天河区"]),
+        ("深圳市", ["罗湖区", "南山区"]),
+    ]),
+    ("江苏省", "320000", 0.105, [
+        ("南京市", ["玄武区", "江宁区"]),
+        ("苏州市", ["姑苏区", "昆山市"]),
+    ]),
+    ("山东省", "370000", 0.095, [
+        ("济南市", ["历下区", "章丘区"]),
+        ("青岛市", ["市南区", "黄岛区"]),
+    ]),
+    ("浙江省", "330000", 0.080, [
+        ("杭州市", ["上城区", "余杭区"]),
+        ("宁波市", ["海曙区", "鄞州区"]),
+    ]),
+    ("河南省", "410000", 0.065, [
+        ("郑州市", ["金水区", "中牟县"]),
+        ("洛阳市", ["涧西区", "偃师区"]),
+    ]),
+    ("四川省", "510000", 0.055, [
+        ("成都市", ["锦江区", "双流区"]),
+        ("绵阳市", ["涪城区", "江油市"]),
+    ]),
+    ("河北省", "130000", 0.050, [
+        ("石家庄市", ["长安区", "正定县"]),
+        ("唐山市", ["路南区", "丰润区"]),
+    ]),
+    ("湖北省", "420000", 0.048, [
+        ("武汉市", ["江岸区", "洪山区"]),
+        ("宜昌市", ["西陵区", "宜都市"]),
+    ]),
+    ("湖南省", "430000", 0.045, [
+        ("长沙市", ["岳麓区", "长沙县"]),
+        ("岳阳市", ["岳阳楼区", "汨罗市"]),
+    ]),
+    ("福建省", "350000", 0.042, [
+        ("福州市", ["鼓楼区", "闽侯县"]),
+        ("厦门市", ["思明区", "集美区"]),
+    ]),
+    ("安徽省", "340000", 0.040, [
+        ("合肥市", ["庐阳区", "肥东县"]),
+        ("芜湖市", ["镜湖区", "无为市"]),
+    ]),
+    ("上海市", "310000", 0.038, [
+        ("上海市", ["浦东新区", "闵行区"]),
+    ]),
+    ("江西省", "360000", 0.032, [
+        ("南昌市", ["东湖区", "南昌县"]),
+        ("赣州市", ["章贡区", "南康区"]),
+    ]),
+    ("辽宁省", "210000", 0.030, [
+        ("沈阳市", ["和平区", "浑南区"]),
+        ("大连市", ["中山区", "金州区"]),
+    ]),
+    ("重庆市", "500000", 0.028, [
+        ("重庆市", ["渝北区", "江津区"]),
+    ]),
+    ("广西壮族自治区", "450000", 0.026, [
+        ("南宁市", ["青秀区", "武鸣区"]),
+        ("柳州市", ["城中区", "柳江区"]),
+    ]),
+    ("陕西省", "610000", 0.024, [
+        ("西安市", ["雁塔区", "长安区"]),
+        ("宝鸡市", ["渭滨区", "凤翔区"]),
+    ]),
+    ("云南省", "530000", 0.022, [
+        ("昆明市", ["五华区", "呈贡区"]),
+        ("曲靖市", ["麒麟区", "沾益区"]),
+    ]),
+    ("山西省", "140000", 0.020, [
+        ("太原市", ["小店区", "清徐县"]),
+        ("大同市", ["平城区", "云冈区"]),
+    ]),
+    ("天津市", "120000", 0.018, [
+        ("天津市", ["滨海新区", "南开区"]),
+    ]),
+    ("北京市", "110000", 0.017, [
+        ("北京市", ["朝阳区", "海淀区"]),
+    ]),
+    ("内蒙古自治区", "150000", 0.016, [
+        ("呼和浩特市", ["新城区", "赛罕区"]),
+        ("包头市", ["昆都仑区", "东河区"]),
+    ]),
+    ("贵州省", "520000", 0.014, [
+        ("贵阳市", ["南明区", "观山湖区"]),
+        ("遵义市", ["红花岗区", "播州区"]),
+    ]),
+    ("黑龙江省", "230000", 0.013, [
+        ("哈尔滨市", ["南岗区", "道里区"]),
+        ("大庆市", ["萨尔图区", "让胡路区"]),
+    ]),
+    ("吉林省", "220000", 0.012, [
+        ("长春市", ["南关区", "朝阳区"]),
+        ("吉林市", ["昌邑区", "船营区"]),
+    ]),
+    ("新疆维吾尔自治区", "650000", 0.011, [
+        ("乌鲁木齐市", ["天山区", "沙依巴克区"]),
+        ("昌吉回族自治州", ["昌吉市", "阜康市"]),
+    ]),
+    ("甘肃省", "620000", 0.010, [
+        ("兰州市", ["城关区", "安宁区"]),
+        ("天水市", ["秦州区", "麦积区"]),
+    ]),
+    ("海南省", "460000", 0.008, [
+        ("海口市", ["龙华区", "美兰区"]),
+        ("三亚市", ["吉阳区", "天涯区"]),
+    ]),
+    ("宁夏回族自治区", "640000", 0.006, [
+        ("银川市", ["兴庆区", "金凤区"]),
+        ("吴忠市", ["利通区", "青铜峡市"]),
+    ]),
+    ("青海省", "630000", 0.004, [
+        ("西宁市", ["城中区", "湟中区"]),
+        ("海东市", ["乐都区", "平安区"]),
+    ]),
+    ("西藏自治区", "540000", 0.002, [
+        ("拉萨市", ["城关区", "堆龙德庆区"]),
+        ("日喀则市", ["桑珠孜区", "江孜县"]),
+    ]),
+    ("中国香港", "810000", 0.004, [
+        ("香港岛", ["中西区", "湾仔区"]),
+        ("九龙", ["油尖旺区", "九龙城区"]),
+    ]),
+    ("中国澳门", "820000", 0.001, [
+        ("澳门半岛", ["花地玛堂区", "大堂区"]),
+        ("氹仔", ["嘉模堂区", "路氹城"]),
+    ]),
+    ("中国台湾", "710000", 0.006, [
+        ("台北市", ["中正区", "信义区"]),
+        ("高雄市", ["鼓山区", "左营区"]),
+    ]),
+]
+
+
+def _jitter(seed: str, span: float = 4.0) -> float:
+    """确定性抖动，范围约 [-span, span]，让各区指标不完全相同。"""
+    return (zlib.crc32(seed.encode("utf-8")) % 1000 / 1000.0 - 0.5) * 2 * span
+
+
+def _weights(names: List[str]) -> List[float]:
+    """按名称生成确定性权重并归一化。"""
+    raw = [1.0 + (zlib.crc32(n.encode("utf-8")) % 60) / 100.0 for n in names]
+    total = sum(raw)
+    return [w / total for w in raw]
+
+
+def _make_stats(recovery: float, production: float, seed: str) -> Dict[str, object]:
+    return {
+        "回收量(万吨)": round(recovery, 2),
+        "纸及纸板产量(万吨)": round(production, 2),
+        "回收率(%)": round(51.1 + _jitter(seed + "r"), 1),
+        "利用率(%)": round(51.6 + _jitter(seed + "u"), 1),
+        "回收企业数(家)": max(1, int(round(recovery * 0.55))),
+        "从业人员(人)": max(10, int(round(recovery * 85))),
+    }
+
+
+def _build() -> Dict[str, object]:
+    total_r = NATIONAL_STATS["回收量(万吨)"]
+    total_p = NATIONAL_STATS["纸及纸板产量(万吨)"]
+    raw_w = [p[2] for p in _RAW]
+    wsum = sum(raw_w)
+
+    provinces = []
+    for pname, pcode, weight, cities in _RAW:
+        pw = weight / wsum
+        p_r, p_p = total_r * pw, total_p * pw
+        city_ws = _weights([c[0] for c in cities])
+        city_nodes = []
+        for ci, ((cname, counties), cw) in enumerate(zip(cities, city_ws)):
+            c_r, c_p = p_r * cw, p_p * cw
+            d_ws = _weights(counties)
+            county_nodes = []
+            for di, (dname, dw) in enumerate(zip(counties, d_ws)):
+                county_nodes.append({
+                    "code": f"{pcode}-C{ci + 1}-D{di + 1}",
+                    "name": dname,
+                    "level": "county",
+                    "parent": f"{pcode}-C{ci + 1}",
+                    "stats": _make_stats(c_r * dw, c_p * dw, pcode + cname + dname),
+                    "provenance": PROVENANCE_MODEL,
+                })
+            city_nodes.append({
+                "code": f"{pcode}-C{ci + 1}",
+                "name": cname,
+                "level": "city",
+                "parent": pcode,
+                "stats": _make_stats(c_r, c_p, pcode + cname),
+                "provenance": PROVENANCE_MODEL,
+                "children": county_nodes,
+            })
+        provinces.append({
+            "code": pcode,
+            "name": pname,
+            "level": "province",
+            "parent": "CN",
+            "stats": _make_stats(p_r, p_p, pcode + pname),
+            "provenance": PROVENANCE_MODEL,
+            "children": city_nodes,
+        })
+
+    return {
+        "code": "CN",
+        "name": "全国",
+        "level": "national",
+        "parent": None,
+        "stats": dict(NATIONAL_STATS),
+        "provenance": PROVENANCE_OFFICIAL,
+        "children": provinces,
+    }
+
+
+ROOT = _build()
+
+_INDEX: Dict[str, Dict[str, object]] = {}
+
+
+def _index(node: Dict[str, object]) -> None:
+    _INDEX[node["code"]] = node  # type: ignore[index]
+    for child in node.get("children", []):  # type: ignore[union-attr]
+        _index(child)
+
+
+_index(ROOT)
+
+
+def get_node(code: str) -> Optional[Dict[str, object]]:
+    return _INDEX.get(code)
+
+
+def get_children(code: str) -> List[Dict[str, object]]:
+    node = _INDEX.get(code)
+    return list(node.get("children", [])) if node else []  # type: ignore[union-attr]
+
+
+def breadcrumb(code: str) -> List[Dict[str, str]]:
+    path: List[Dict[str, str]] = []
+    node = _INDEX.get(code)
+    while node:
+        path.append({"code": node["code"], "name": node["name"]})  # type: ignore[arg-type]
+        parent = node.get("parent")  # type: ignore[union-attr]
+        node = _INDEX.get(parent) if parent else None
+    return list(reversed(path))
+
+
+def find(name: str) -> Optional[Dict[str, object]]:
+    """按名称查找区域：先精确匹配，再包含匹配。"""
+    if not name:
+        return None
+    for node in _INDEX.values():
+        if node["name"] == name:
+            return node
+    for node in _INDEX.values():
+        n = str(node["name"])
+        if n and (n in name or name in n):
+            return node
+    return None
+
+
+def summary(code: str = "CN") -> str:
+    node = get_node(code)
+    if not node:
+        return "未找到该区域。"
+    stats = node["stats"]
+    lines = [f"【{node['name']}】废纸回收统计（{node['provenance']}）"]
+    for key, value in stats.items():  # type: ignore[union-attr]
+        lines.append(f"- {key}：{value}")
+    children = get_children(code)
+    if children:
+        lines.append(f"下辖 {len(children)} 个区域，可在界面中逐级下钻。")
+    return "\n".join(lines)
+
+
+def tree() -> Dict[str, object]:
+    def light(node: Dict[str, object]) -> Dict[str, object]:
+        return {
+            "code": node["code"],
+            "name": node["name"],
+            "level": node["level"],
+            "children": [light(c) for c in node.get("children", [])],  # type: ignore[union-attr]
+        }
+
+    return light(ROOT)
+
+
+def export_xlsx(code: str = "CN") -> bytes:
+    """导出指定区域的下级统计为 Excel（.xlsx）。"""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    node = get_node(code) or ROOT
+    children = get_children(str(node["code"]))
+    rows = children if children else [node]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "区域统计"
+    headers = [
+        "区域", "层级", "回收量(万吨)", "纸及纸板产量(万吨)",
+        "回收率(%)", "利用率(%)", "回收企业数(家)", "从业人员(人)", "数据来源",
+    ]
+    ws.append(headers)
+    for r in rows:
+        s = r["stats"]  # type: ignore[index]
+        ws.append([
+            r["name"], r["level"],
+            s.get("回收量(万吨)"), s.get("纸及纸板产量(万吨)"),
+            s.get("回收率(%)"), s.get("利用率(%)"),
+            s.get("回收企业数(家)"), s.get("从业人员(人)"),
+            r["provenance"],
+        ])
+    if children:
+        total_r = round(sum(float(c["stats"].get("回收量(万吨)", 0)) for c in children), 2)  # type: ignore[index]
+        ws.append(["合计", "", total_r, "", "", "", "", "", ""])
+
+    for col, width in zip("ABCDEFGHI", [14, 10, 16, 20, 10, 10, 14, 12, 44]):
+        ws.column_dimensions[col].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+```
+
 ### classifier.py（分类引擎）
 
 _src/paper_recycle_agent/classifier.py_
@@ -492,12 +881,13 @@ _src/paper_recycle_agent/agent.py_
 import re
 from typing import Dict, Optional
 
-from . import classifier, data, pricing
+from . import classifier, data, pricing, regions
 
 _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
 _HELP = {"帮助", "help", "怎么用", "功能", "能做什么", "用法"}
-_DATA = {"年鉴", "行业数据", "回收量", "利用率", "进口", "标准", "分类标准",
-         "gb/t", "20811", "造纸", "废纸分几类", "废纸分类"}
+_DATA = {"年鉴", "行业数据", "进口", "标准", "分类标准", "gb/t", "20811",
+         "造纸", "废纸分几类", "废纸分类"}
+_REGION = {"回收量", "利用率", "回收率", "统计", "企业数", "从业人员", "数据"}
 
 
 def _extract_weight(text: str) -> Optional[float]:
@@ -530,6 +920,11 @@ def respond(user_input: str) -> str:
     if any(k in text for k in _DATA):
         return data.summary_text()
 
+    # 区域分层统计查询（国家 / 省 / 市 / 县区）
+    if any(k in text for k in _REGION):
+        node = regions.find(text)
+        return regions.summary(node["code"] if node else "CN")
+
     weight = _extract_weight(text)
     if weight is not None:
         return pricing.estimate(text, weight)["message"]
@@ -545,7 +940,8 @@ def _help_text() -> str:
             "1) 查询是否可回收：直接说物品名，如「纸箱」「报纸」「纸巾」。",
             "2) 估算回收价值：物品名 + 重量，如「办公用纸 3kg」「纸箱 5 斤」。",
             "3) 查看全部类别：输入「类别」。",
-            "4) 年鉴与行业数据：输入「年鉴」「行业数据」「废纸分类」「回收量」。",
+            "4) 年鉴与行业数据：输入「年鉴」「行业数据」「废纸分类」。",
+            "5) 区域分层统计：输入省/市/县名 + 「回收量」，如「广东省回收量」。",
         ]
     )
 ```
@@ -627,20 +1023,22 @@ _app/server.py_
 
 运行：uvicorn app.server:app --reload
 接口：
-  GET  /            -> 图形界面（聊天 + 年鉴/行业数据面板）
-  GET  /api/info    -> {categories, industry, quality, sources}
-  POST /chat        -> {"reply": "..."}
-  GET  /health      -> {"status": "ok"}
+  GET  / 与 /index.html -> 图形界面（聊天 + 年鉴/行业数据面板）
+  GET  /api/info        -> {categories, industry, quality, sources}
+  POST /chat            -> {"reply": "..."}
+  GET  /health          -> {"status": "ok"}
 """
 
+import io
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Response
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
+from paper_recycle_agent import regions
 from paper_recycle_agent import respond
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -654,9 +1052,16 @@ class ChatReq(BaseModel):
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
     return HTMLResponse(html)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    # 避免浏览器请求 favicon 时产生 404 噪音
+    return Response(status_code=204)
 
 
 @app.get("/api/info")
@@ -669,6 +1074,39 @@ def info() -> dict:
     }
 
 
+def _shallow(node: dict) -> dict:
+    return {k: v for k, v in node.items() if k != "children"}
+
+
+@app.get("/api/regions")
+def regions_tree() -> dict:
+    return regions.tree()
+
+
+@app.get("/api/stats")
+def stats(code: str = "CN") -> dict:
+    node = regions.get_node(code) or regions.get_node("CN")
+    children = regions.get_children(str(node["code"]))
+    return {
+        "node": _shallow(node),
+        "children": [_shallow(c) for c in children],
+        "breadcrumb": regions.breadcrumb(str(node["code"])),
+    }
+
+
+@app.get("/export.xlsx")
+def export(code: str = "CN") -> StreamingResponse:
+    node = regions.get_node(code) or regions.get_node("CN")
+    content = regions.export_xlsx(str(node["code"]))
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": 'attachment; filename="paper_recycle_stats.xlsx"'},
+    )
+
+
 @app.post("/chat")
 def chat(req: ChatReq) -> dict:
     return {"reply": respond(req.message)}
@@ -679,7 +1117,7 @@ def health() -> dict:
     return {"status": "ok"}
 ```
 
-### static/index.html（聊天界面）
+### static/index.html（聊天+区域统计界面）
 
 _app/static/index.html_
 
@@ -692,82 +1130,109 @@ _app/static/index.html_
 <title>废纸回收 Agent 对话助手</title>
 <style>
   :root {
-    --bg: #f5f7fa;
-    --panel: #ffffff;
-    --ink: #1f2329;
-    --muted: #6b7280;
-    --brand: #2f7d4f;
-    --brand-soft: #e8f3ec;
-    --border: #e5e7eb;
-    --user-bubble: #2f7d4f;
-    --bot-bubble: #eef1f5;
+    --bg: #f5f7fa; --panel: #ffffff; --ink: #1f2329; --muted: #6b7280;
+    --brand: #2f7d4f; --brand-soft: #e8f3ec; --border: #e5e7eb;
+    --user-bubble: #2f7d4f; --bot-bubble: #eef1f5;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: var(--bg); color: var(--ink); height: 100vh; display: flex; flex-direction: column;
-  }
-  header {
-    background: var(--brand); color: #fff; padding: 14px 20px; font-size: 18px; font-weight: 600;
-    display: flex; align-items: center; gap: 10px;
-  }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--ink); height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--brand); color: #fff; padding: 12px 20px; font-size: 17px; font-weight: 600;
+           display: flex; align-items: center; gap: 10px; }
   header .sub { font-size: 12px; font-weight: 400; opacity: .85; }
   .layout { flex: 1; display: flex; min-height: 0; }
   .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 80%; padding: 9px 13px; border-radius: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
   .msg.bot { background: var(--bot-bubble); align-self: flex-start; border-bottom-left-radius: 4px; }
   .msg.user { background: var(--user-bubble); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 18px 8px; }
-  .chip { background: var(--brand-soft); color: var(--brand); border: 1px solid #cfe6da; border-radius: 16px;
-          padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 8px; }
+  .chip { background: var(--brand-soft); color: var(--brand); border: 1px solid #cfe6da; border-radius: 15px;
+          padding: 5px 11px; font-size: 12px; cursor: pointer; }
   .chip:hover { background: #dcefe2; }
-  .inputbar { display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); background: var(--panel); }
-  .inputbar input { flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 15px; outline: none; }
+  .inputbar { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); align-items: center; }
+  .inputbar input { flex: 1; padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; font-size: 14px; outline: none; }
   .inputbar input:focus { border-color: var(--brand); }
-  .inputbar button { background: var(--brand); color: #fff; border: none; border-radius: 10px; padding: 0 22px; font-size: 15px; cursor: pointer; }
+  .inputbar button { background: var(--brand); color: #fff; border: none; border-radius: 9px; padding: 0 18px; height: 38px; font-size: 14px; cursor: pointer; }
   .inputbar button:disabled { opacity: .5; cursor: default; }
-  .side { width: 340px; border-left: 1px solid var(--border); background: var(--panel); overflow-y: auto; padding: 16px; }
-  .side h3 { margin: 0 0 10px; font-size: 15px; color: var(--brand); }
-  .side h4 { margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .cat { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
-  .cat .name { font-weight: 600; font-size: 14px; }
-  .cat .ex { color: var(--muted); font-size: 12px; margin-top: 3px; }
-  .cat .note { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
-  th { background: var(--brand-soft); color: var(--brand); }
-  .src { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 8px; }
-  @media (max-width: 820px) { .side { display: none; } }
+  #micBtn { background: #fff; color: var(--brand); border: 1px solid var(--border); width: 40px; padding: 0; font-size: 17px; }
+  #micBtn.listening { background: #fde8e8; border-color: #f5b5b5; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(220,80,80,.4);} 70%{box-shadow:0 0 0 10px rgba(220,80,80,0);} 100%{box-shadow:0 0 0 0 rgba(220,80,80,0);} }
+  .side { width: 440px; border-left: 1px solid var(--border); background: var(--panel); overflow-y: auto; padding: 14px 16px; }
+  .side h3 { margin: 0 0 4px; font-size: 15px; color: var(--brand); }
+  .side .hint { font-size: 11px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+  .crumb { font-size: 13px; margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+  .crumb-item { color: var(--brand); cursor: pointer; }
+  .crumb-item:hover { text-decoration: underline; }
+  .crumb .sep { color: var(--muted); }
+  .summary { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; background: #fbfcfd; }
+  .sum-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; font-weight: 400; color: var(--brand); background: var(--brand-soft); border-radius: 10px; padding: 2px 8px; }
+  .sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+  .sum-grid div { display: flex; justify-content: space-between; font-size: 12px; }
+  .sum-grid span { color: var(--muted); }
+  .sum-grid b { color: var(--ink); }
+  .prov { font-size: 10px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border-bottom: 1px solid var(--border); padding: 6px 6px; text-align: left; }
+  th { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+  tbody tr.row { cursor: pointer; }
+  tbody tr.row:hover { background: #f2f8f4; }
+  td.empty { color: var(--muted); text-align: center; padding: 14px 0; }
+  .actions { display: flex; gap: 8px; margin: 10px 0 6px; }
+  .actions button { flex: 1; height: 34px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--ink); }
+  .actions #exportBtn { background: var(--brand); color: #fff; border-color: var(--brand); }
+  details.standards { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 8px; }
+  details.standards summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .std-cat { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px; font-size: 11px; }
+  .std-cat .nm { font-weight: 600; font-size: 12px; }
+  .std-cat .ex, .std-cat .nt { color: var(--muted); margin-top: 2px; }
+  @media (max-width: 900px) { .side { display: none; } }
 </style>
 </head>
 <body>
-<header>🪨 废纸回收 Agent 对话助手 <span class="sub">分类 · 估价 · 年鉴数据</span></header>
+<header>🪨 废纸回收 Agent 对话助手 <span class="sub">四级区域统计 · 分类估价 · 语音输入 · Excel 导出</span></header>
 <div class="layout">
   <div class="chat">
     <div class="messages" id="messages"></div>
     <div class="chips" id="chips"></div>
     <div class="inputbar">
-      <input id="input" placeholder="说说废纸物品，如：纸箱 2kg / 废纸分类 / 回收量" onkeydown="if(event.key==='Enter')send()" />
+      <button id="micBtn" title="语音输入（需 Chrome/Edge）">🎤</button>
+      <input id="input" placeholder="说或输入：纸箱 2kg / 广东省回收量 / 废纸分类" onkeydown="if(event.key==='Enter')send()" />
       <button id="sendBtn" onclick="send()">发送</button>
     </div>
   </div>
   <aside class="side">
-    <h3>废纸分类（GB/T 20811-2018）</h3>
-    <div id="cats"></div>
-    <h4>2024 年行业数据</h4>
-    <table id="industry"><thead><tr><th>指标</th><th>数值</th><th>同比</th></tr></thead><tbody></tbody></table>
-    <h4>数据来源</h4>
-    <div class="src" id="src"></div>
+    <h3>区域废纸回收统计</h3>
+    <div class="hint">点击表格中的区域可逐级下钻：全国 → 省 → 市 → 县区。国家级为官方口径，省市县为分层测算（可替换真实数据）。</div>
+    <div class="crumb" id="crumb"></div>
+    <div class="summary" id="summary"></div>
+    <table id="statsTable">
+      <thead><tr><th>区域</th><th>回收量(万吨)</th><th>回收率(%)</th><th>利用率(%)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="actions">
+      <button id="backBtn" onclick="goBack()">返回上一级</button>
+      <button id="exportBtn" onclick="exportExcel()">导出 Excel</button>
+    </div>
+    <details class="standards">
+      <summary>内部参考：行业标准（GB/T 20811-2018）</summary>
+      <div id="standardsBody"></div>
+    </details>
   </aside>
 </div>
 
 <script>
-  const SUGGESTIONS = ["纸箱能回收吗", "办公用纸 3kg", "废纸分类", "回收量多少", "纸巾可回收吗"];
+  const SUGGESTIONS = ["纸箱能回收吗", "办公用纸 3kg", "广东省回收量", "废纸分类", "全国统计"];
   const messagesEl = document.getElementById("messages");
   const chipsEl = document.getElementById("chips");
   const inputEl = document.getElementById("input");
   const sendBtn = document.getElementById("sendBtn");
+  const micBtn = document.getElementById("micBtn");
+  const LEVEL = { national: "国家", province: "省", city: "市", county: "县区" };
+
+  let currentCode = "CN";
+  let breadcrumb = [];
 
   function addMsg(text, who) {
     const div = document.createElement("div");
@@ -804,30 +1269,113 @@ _app/static/index.html_
     }
   }
 
+  function renderCrumb(items) {
+    const el = document.getElementById("crumb");
+    el.innerHTML = "";
+    items.forEach((it, i) => {
+      const a = document.createElement("span");
+      a.className = "crumb-item"; a.textContent = it.name;
+      a.onclick = () => loadStats(it.code);
+      el.appendChild(a);
+      if (i < items.length - 1) {
+        const s = document.createElement("span"); s.className = "sep"; s.textContent = " / ";
+        el.appendChild(s);
+      }
+    });
+  }
+
+  function renderSummary(node) {
+    const s = node.stats;
+    document.getElementById("summary").innerHTML =
+      `<div class="sum-name">${node.name} <span class="badge">${LEVEL[node.level] || node.level}</span></div>
+       <div class="sum-grid">
+         <div><span>回收量</span><b>${s["回收量(万吨)"]} 万吨</b></div>
+         <div><span>回收率</span><b>${s["回收率(%)"]}%</b></div>
+         <div><span>利用率</span><b>${s["利用率(%)"]}%</b></div>
+         <div><span>企业数</span><b>${s["回收企业数(家)"]}</b></div>
+       </div>
+       <div class="prov">${node.provenance}</div>`;
+  }
+
+  function renderTable(children) {
+    const tb = document.querySelector("#statsTable tbody");
+    tb.innerHTML = "";
+    if (!children.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="4" class="empty">该区域为最末级（县区），无下级明细</td>`;
+      tb.appendChild(tr);
+      return;
+    }
+    children.forEach(c => {
+      const tr = document.createElement("tr");
+      tr.className = "row";
+      tr.onclick = () => loadStats(c.code);
+      tr.innerHTML = `<td>${c.name}</td><td>${c.stats["回收量(万吨)"]}</td>` +
+                     `<td>${c.stats["回收率(%)"]}</td><td>${c.stats["利用率(%)"]}</td>`;
+      tb.appendChild(tr);
+    });
+  }
+
+  async function loadStats(code) {
+    try {
+      const res = await fetch(`/api/stats?code=${encodeURIComponent(code)}`);
+      const data = await res.json();
+      currentCode = data.node.code;
+      breadcrumb = data.breadcrumb;
+      renderCrumb(data.breadcrumb);
+      renderSummary(data.node);
+      renderTable(data.children);
+    } catch (e) { /* ignore */ }
+  }
+
+  function goBack() {
+    if (breadcrumb.length > 1) loadStats(breadcrumb[breadcrumb.length - 2].code);
+  }
+
+  function exportExcel() {
+    window.location.href = `/export.xlsx?code=${encodeURIComponent(currentCode)}`;
+  }
+
   async function loadInfo() {
     try {
       const res = await fetch("/api/info");
       const info = await res.json();
-      const cats = document.getElementById("cats");
+      const box = document.getElementById("standardsBody");
       info.categories.forEach(c => {
         const d = document.createElement("div");
-        d.className = "cat";
-        d.innerHTML = `<div class="name">${c.code}. ${c.name}</div>` +
+        d.className = "std-cat";
+        d.innerHTML = `<div class="nm">${c.code}. ${c.name}</div>` +
                       `<div class="ex">${c.examples.join("、")}</div>` +
-                      `<div class="note">${c.note}</div>`;
-        cats.appendChild(d);
+                      `<div class="nt">${c.note}</div>`;
+        box.appendChild(d);
       });
-      const tb = document.querySelector("#industry tbody");
-      info.industry.forEach(r => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${r.指标}</td><td>${r.数值}</td><td>${r.同比}</td>`;
-        tb.appendChild(tr);
-      });
-      document.getElementById("src").innerHTML = info.sources.join("<br/>");
     } catch (e) { /* ignore */ }
   }
 
-  addMsg("你好，我是废纸回收助手 🪨。可以问我废纸是否可回收、估算回收价值，或查询《中国造纸年鉴》废纸分类与行业数据。", "bot");
+  // 语音输入（浏览器 Web Speech API，无需第三方）
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null;
+  if (SR) {
+    recog = new SR();
+    recog.lang = "zh-CN";
+    recog.interimResults = false;
+    recog.maxAlternatives = 1;
+    recog.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      inputEl.value = text;
+      send();
+    };
+    recog.onerror = () => micBtn.classList.remove("listening");
+    recog.onend = () => micBtn.classList.remove("listening");
+  }
+  micBtn.onclick = () => {
+    if (!recog) { alert("当前浏览器不支持语音输入，请用 Chrome / Edge 打开。"); return; }
+    micBtn.classList.add("listening");
+    try { recog.start(); } catch (e) { recog.stop(); }
+  };
+
+  addMsg("你好，我是废纸回收助手 🪨。可以问我废纸是否可回收、估算价值，或查询某个省/市/县区的回收统计。右侧可直接下钻并导出 Excel。", "bot");
+  loadStats("CN");
   loadInfo();
 </script>
 </body>
@@ -975,4 +1523,53 @@ def test_summary_text_mentions_standard():
 
 def test_quality_rules_present():
     assert "水分" in data.QUALITY_RULES
+```
+
+### test_regions.py
+
+_tests/test_regions.py_
+
+```text
+from paper_recycle_agent import regions
+
+
+def test_national_node_official():
+    node = regions.get_node("CN")
+    assert node is not None
+    assert node["name"] == "全国"
+    assert node["stats"]["回收量(万吨)"] == 6971.0
+    assert "官方" in node["provenance"]
+
+
+def test_children_levels():
+    provinces = regions.get_children("CN")
+    assert len(provinces) >= 30
+    assert all(p["level"] == "province" for p in provinces)
+    # 广东省 -> 市 -> 县区
+    gd = regions.find("广东省")
+    assert gd is not None
+    cities = regions.get_children(gd["code"])
+    assert cities and all(c["level"] == "city" for c in cities)
+    counties = regions.get_children(cities[0]["code"])
+    assert counties and all(c["level"] == "county" for c in counties)
+
+
+def test_breadcrumb_order():
+    gd = regions.find("广东省")
+    city = regions.get_children(gd["code"])[0]
+    crumb = regions.breadcrumb(city["code"])
+    assert crumb[0]["code"] == "CN"
+    assert crumb[-1]["code"] == city["code"]
+
+
+def test_summary_contains_name():
+    text = regions.summary("CN")
+    assert "全国" in text
+    assert "6971" in text
+
+
+def test_export_xlsx_bytes():
+    data = regions.export_xlsx("CN")
+    assert data[:2] == b"PK"  # xlsx 是 zip 容器
+    assert len(data) > 1000
 ```

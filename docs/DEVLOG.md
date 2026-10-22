@@ -72,5 +72,18 @@ git log --oneline --graph --all
 
 提交节奏：feature 分支 → `--no-ff` 合并（PR #9 / #10），文档与版本号在 main 上收尾（#11）。
 
+## v1.2 四级区域统计 + Excel 导出 + 语音输入（2026-10-22）
+
+针对「只能看全国一个数」的问题，按统计局工作场景扩展（Issue #12 / #13 / #14）：
+
+- **Issue #12 四级区域统计**：新增 `regions.py`，覆盖全国 → 34 个省级行政区 → 市 → 县区，
+  支持逐级下钻、面包屑与区域汇总。国家级为官方口径，省市县为可替换的分层测算数据（带 provenance）。
+- **Issue #12 Excel 导出**：`/export.xlsx?code=...` 用 openpyxl 生成 .xlsx（含表头、合计行、列宽），
+  统计局人员可直接下载使用；同时提供 `/api/stats`、`/api/regions` 接口。
+- **Issue #13 图形界面**：重做 `app/static/index.html`，右侧为区域统计面板（下钻表格、返回上一级、导出按钮），
+  行业标准收进「内部参考」折叠区；聊天框加入 🎤 语音输入（浏览器 Web Speech API）。
+- **Issue #14 文档与测试**：补 `tests/test_regions.py`，CI 改为安装 `requirements.txt`（含 openpyxl），
+  重新生成 `docs/CODE_LISTING.md`。
+
 你会看到 `main` 上每隔几天一次提交，外加 6 个 `--no-ff` 合并节点，
 每个合并都对应一个 `feature/*` 分支——这就是「连续开发」在 Git 上的样子。

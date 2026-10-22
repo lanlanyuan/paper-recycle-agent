@@ -13,7 +13,10 @@
 - 自然语言对话（问候 / 帮助 / 估价 / 分类）
 - 命令行 `chat` / `classify` / `price` / `categories` / `info`
 - **接入《中国造纸年鉴》废纸分类（GB/T 20811-2018，8 大类 42 小类）与 2024 行业数据**
-- **Web 图形界面**：FastAPI 聊天页（含分类与行业数据面板）
+- **国家 → 省 → 市 → 县区四级区域统计**，界面可逐级下钻
+- **一键导出 Excel**（供统计局人员直接使用）
+- **对话支持语音输入**（浏览器 Web Speech API，无需第三方 ASR）
+- **Web 图形界面**：FastAPI 聊天页 + 区域统计面板
 - GitHub Actions 多版本 CI
 
 ## 快速开始
@@ -31,13 +34,15 @@ paper-recycle-agent/
 ├── src/paper_recycle_agent/   # 核心包（纯标准库）
 │   ├── knowledge.py           # 知识库（9 类实用回收指引）
 │   ├── data.py                # 年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
+│   ├── regions.py             # 国家→省→市→县区四级统计（含 Excel 导出）
 │   ├── classifier.py          # 分类引擎
 │   ├── pricing.py             # 估价
 │   ├── agent.py               # 对话引擎
 │   └── cli.py                 # 命令行
 ├── tests/                     # pytest 单元测试
-├── app/server.py              # FastAPI 服务（提供图形界面）
-├── app/static/index.html      # 聊天界面（含分类/数据面板）
+├── app/server.py              # FastAPI 服务（图形界面 + 区域统计 + 导出）
+├── app/static/index.html      # 聊天界面（区域下钻 / 导出 / 语音输入）
+├── run.py                     # 读取 PORT 的统一启动入口
 ├── docs/                      # 使用/贡献/开发日志/代码清单
 └── .github/workflows/ci.yml   # CI
 ```
