@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.5.0　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.6.0　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`54c4c52`
+- 生成时提交：`482f5d3`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -16,7 +16,7 @@
 
 ## 一、核心包（src/paper_recycle_agent）
 
-### `src/paper_recycle_agent/__init__.py`（33 行）
+### `src/paper_recycle_agent/__init__.py`（35 行）
 
 ```python
 """废纸回收 Agent 对话助手。
@@ -34,11 +34,11 @@ if sys.version_info < (3, 7):  # pragma: no cover - 仅在旧解释器上触发
         )
     )
 
-from . import (agent, classifier, data, enterprises, exporter, knowledge,  # noqa: E402
-               pricing, regions, stats)
+from . import (agent, classifier, data, enterprises, exporter, io_table,  # noqa: E402
+               knowledge, llm, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 __all__ = [
     "agent",
@@ -46,7 +46,9 @@ __all__ = [
     "data",
     "enterprises",
     "exporter",
+    "io_table",
     "knowledge",
+    "llm",
     "pricing",
     "regions",
     "stats",
@@ -54,7 +56,7 @@ __all__ = [
 ]
 ```
 
-### `src/paper_recycle_agent/agent.py`（131 行）
+### `src/paper_recycle_agent/agent.py`（154 行）
 
 ```python
 """对话引擎：把分类 / 估价 / 统计能力包装成自然语言回复。"""
@@ -69,6 +71,9 @@ _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
 _HELP = {"帮助", "help", "怎么用", "功能", "能做什么", "用法"}
 # 历年趋势类
 _HISTORY = {"历年", "年份", "以前", "过去", "趋势", "增长", "变化", "这几年", "近五年", "历史数据"}
+# 投入产出 / 消耗金额类（必须放在区域与估价之前，否则「金额」会被当成卖废品估价）
+_IO = {"投入产出", "消耗金额", "采购金额", "消耗系数", "货值", "产值消耗",
+       "消耗了多少钱", "花了多少钱", "投入产出表"}
 # 按类别拆分回收量类
 _CATEGORY_STATS = {"分类数据", "分类回收", "类别占比", "各类回收", "八大类", "按类别", "分类占比", "品种结构"}
 # 年鉴 / 标准 / 分类定义类
@@ -112,10 +117,29 @@ def respond(user_input: str) -> str:
     if low in _GREETING:
         return (
             "你好，我是废纸回收助手 🪨。可以问我：废纸是否可回收、估算回收价值、"
-            "全国/各省回收统计、历年趋势、八大类分类回收量。输入「帮助」查看用法。"
+            "全国/各省回收统计、历年趋势、八大类分类回收量、废纸消耗金额。输入「帮助」查看用法。"
         )
     if any(k in text for k in _HELP):
         return _help_text()
+
+    # 投入产出：消耗金额 / 直接消耗系数
+    if any(k in text for k in _IO):
+        from . import io_table
+
+        year = _extract_year(text) or int(io_table.NATIONAL_IO["year"])
+        node = regions.find(text)
+        if node is not None and node["level"] == "province":
+            share = float(node["stats"]["占全国比重(%)"]) / 100.0  # type: ignore[index]
+            total = float(io_table.spend(year)["amount"]) * share
+            dc = io_table.direct_coefficient(year)
+            coef = "—" if dc["coefficient"] is None else f"{dc['coefficient_pct']}%"
+            return (
+                f"{node['name']}{year} 年废纸消耗金额约 {total:.1f} 亿元"
+                f"（按该省回收量占全国 {share * 100:.2f}% 分摊，属估算，非实际采购分布）。\n"
+                f"全国同口径 {io_table.spend(year)['amount']} 亿元，"
+                f"直接消耗系数 {coef}（按回收参考价计，属纸厂成本下限）。"
+            )
+        return io_table.summary_text(year)
 
     # 按类别拆分回收量
     if any(k in text for k in _CATEGORY_STATS):
@@ -185,7 +209,8 @@ def _help_text() -> str:
             "5) 看历年趋势：输入「历年数据」「近五年趋势」。",
             "6) 看区域统计（仅全国与省级）：输入「山东省回收量」「全国统计」「排名」。",
             "7) 看企业分布：输入「企业名录」「山东有哪些回收企业」「分拣中心」。",
-            "8) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、说明六张表。",
+            "8) 看消耗金额（投入产出）：输入「废纸消耗金额」「投入产出」「直接消耗系数」。",
+            "9) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、投入产出、说明七张表。",
         ]
     )
 ```
@@ -281,7 +306,7 @@ def list_categories() -> List[Dict[str, object]]:
     ]
 ```
 
-### `src/paper_recycle_agent/cli.py`（99 行）
+### `src/paper_recycle_agent/cli.py`（105 行）
 
 ```python
 """命令行交互入口。"""
@@ -309,6 +334,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("history", help="历年回收量 / 回收率 / 利用率")
     cs = sub.add_parser("catstats", help="按八大类拆分回收量")
     cs.add_argument("year", type=int, nargs="?", default=stats_mod.LATEST_YEAR)
+    io = sub.add_parser("io", help="投入产出：消耗金额与直接消耗系数")
+    io.add_argument("year", type=int, nargs="?", default=2024)
     en = sub.add_parser("enterprises", help="企业名录（可按省 / 类型筛选）")
     en.add_argument("--province", default=None, help="省名，如 山东")
     en.add_argument("--type", dest="etype", default=None, help="企业类型")
@@ -339,6 +366,10 @@ def main(argv=None) -> int:
         print(stats_mod.history_summary())
     elif args.cmd == "catstats":
         print(stats_mod.category_summary(args.year))
+    elif args.cmd == "io":
+        from . import io_table
+
+        print(io_table.summary_text(args.year))
     elif args.cmd == "enterprises":
         from . import enterprises as ent_mod
 
@@ -361,7 +392,7 @@ def main(argv=None) -> int:
         content = exporter.build_workbook(str(node["code"]), args.year)
         with open(args.out, "wb") as fh:
             fh.write(content)
-        print(f"已导出：{args.out}（{len(content)} 字节，6 张工作表）")
+        print(f"已导出：{args.out}（{len(content)} 字节，7 张工作表）")
     else:
         _chat_loop()
     return 0
@@ -835,7 +866,7 @@ def summary(province: Optional[str] = None) -> str:
     return "\n".join(lines)
 ```
 
-### `src/paper_recycle_agent/exporter.py`（301 行）
+### `src/paper_recycle_agent/exporter.py`（362 行）
 
 ```python
 """Excel 导出：面向统计局/行业协会的多表工作簿。
@@ -846,7 +877,8 @@ def summary(province: Optional[str] = None) -> str:
 3. 历年回收   —— 2014—2025 年回收量、消费量、回收率、利用率
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
 5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
-6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
+6. 投入产出   —— 消耗金额、直接消耗系数、单位产值消耗、分省与企业采购金额
+7. 数据说明   —— 数据来源、口径与「官方 / 测算 / 估算 / 示例」区分，供复核
 
 依赖策略
 --------
@@ -858,7 +890,7 @@ openpyxl 只在真正要写工作簿时才导入。这样即使机器上没装 o
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from . import enterprises, regions
+from . import enterprises, io_table, regions
 from . import stats as stats_mod
 
 _INSTALL_HINT = (
@@ -1096,7 +1128,59 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "内置名录为示例数据（虚构名称），可在项目根目录放 data/enterprises.csv 覆盖。",
     )
 
-    # ---- 6. 数据说明 ----
+    # ---- 6. 投入产出 ----
+    ws6io = wb.create_sheet("投入产出")
+    st = _styles()
+    sp = io_table.spend(year)
+    dc = io_table.direct_coefficient(year)
+    uc = io_table.unit_consumption(year)
+
+    ws6io.append([f"{scope_name} 废纸消耗金额（投入产出视角，{year} 年）"])
+    ws6io.cell(row=1, column=1).font = st["title_font"]
+    ws6io.append(["口径：全国为官方投入产出表 + 协会年报；省级为分摊；地级市与企业为估算。"
+                  "金额按回收参考价计价，属纸厂废纸成本下限。"])
+    ws6io.cell(row=2, column=1).font = st["note_font"]
+
+    kv = [
+        ("废纸消耗量(万吨)", sp["tonnage"], sp["tonnage_basis"]),
+        ("加权参考价(元/吨)", sp["avg_price"], "分类结构加权，居民/回收站口径"),
+        ("废纸货值(亿元)", sp["amount"], sp["provenance"]),
+        ("直接消耗系数(%)",
+         "—" if dc["coefficient"] is None else dc["coefficient_pct"],
+         dc["note"]),
+        ("单位产值消耗(吨/万元)",
+         "—" if uc["value"] is None else uc["value"],
+         "消耗量 ÷ 营业收入"),
+    ]
+    ws6io.append(["指标", "数值", "说明"])
+    _style_header(ws6io, 3, 3)
+    for name, value, note in kv:
+        ws6io.append([name, value, note])
+
+    ws6io.append([])
+    ws6io.append([f"{scope_name} 分省消耗金额（亿元）"])
+    ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
+    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "数据性质"])
+    head_row = ws6io.max_row
+    _style_header(ws6io, head_row, 5)
+    for r in io_table.province_spend(year)["rows"]:
+        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"], r["provenance"]])
+
+    ws6io.append([])
+    ws6io.append(["企业采购金额（示例：年经手量 × 均价）"])
+    ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
+    ws6io.append(["企业", "省 / 市", "年经手量(万吨)", "金额(亿元)", "数据性质"])
+    head_row2 = ws6io.max_row
+    _style_header(ws6io, head_row2, 5)
+    for e in io_table.enterprise_spend(year)["rows"]:
+        ws6io.append([e["name"], f"{e['province']} / {e['city']}",
+                      e["volume"], e["amount"], e["provenance"]])
+
+    ws6io.column_dimensions["A"].width = 26
+    for col in ("B", "C", "D", "E"):
+        ws6io.column_dimensions[col].width = 20
+
+    # ---- 7. 数据说明 ----
     ws6 = wb.create_sheet("数据说明")
     ws6.append(["数据来源与口径说明"])
     ws6.cell(row=1, column=1).font = _styles()["title_font"]
@@ -1119,7 +1203,15 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 本工具提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
         "  · 企业名录带城市与经纬度，可在省级以下提供更细的空间视角，但企业样本不代表全量。",
         "",
-        "五、替换为真实数据",
+        "五、投入产出口径",
+        "  · 全国：官方。国家统计局全国投入产出表（42 部门）+ 中国造纸协会年度报告。",
+        "  · 省级：各省均编制本地区投入产出表；本工具的分省金额按回收量占比分摊，非实际采购分布。",
+        "  · 地级市：国家统计局明确「地级市暂不编制投入产出表」，本表按企业名录城市分布分摊，属估算。",
+        "  · 企业：不存在「企业投入产出表」，只有财务报表；本表金额 = 年经手量 × 市场均价，属示例估算。",
+        "  · 金额按回收参考价（居民/回收站口径）计价，不含分拣、打包、运输，",
+        "    因此是纸厂废纸成本的下限，不是到厂采购额；直接消耗系数同此口径。",
+        "",
+        "六、替换为真实数据",
         "  · 省级：修改 src/paper_recycle_agent/regions.py 的 SEEDS，为省份填入 reported 值。",
         "  · 历年：修改 src/paper_recycle_agent/stats.py 的 HISTORY。",
         "  · 分类占比：修改 CATEGORY_SHARES 的锚点年份数值。",
@@ -1139,6 +1231,495 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
 def filename(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> str:
     node = regions.get_node(code) or regions.ROOT
     return f"废纸回收统计_{node['name']}_{year}.xlsx"
+```
+
+### `src/paper_recycle_agent/io_table.py`（484 行）
+
+```python
+"""投入产出模型：把「废纸回收量」换算成「消耗金额」，并给出产业关联系数。
+
+为什么需要这个模块
+------------------
+回收量（万吨）回答的是「有多少货」，但企业和地方政府真正关心的是「值多少钱、
+谁在花钱买、这笔钱在产业链里怎么传导」。投入产出表正是回答这类问题的标准工具。
+
+数据可得性（这是本模块最重要的部分，请务必连同界面上的标签一起阅读）
+------------------------------------------------------------------
+国家统计局在咨询公开中明确：
+
+    「各省（自治区、直辖市）在开展投入产出调查的年份，也同步编制本地区
+     投入产出表。**目前地级市暂不编制投入产出表。**」
+
+因此本模块把口径分成四级，并在每个返回值里带 `provenance`：
+
+    全国    官方    全国投入产出表（42 部门，最新为 2023 年表）+ 中国造纸协会年度报告
+    省级    官方    各省投入产出表（《中国地区投入产出表》逐省出版，42 部门）
+    地级市  估算    国家统计局不编制；按企业名录的城市分布分摊，仅供结构参考
+    企业    示例    企业没有「投入产出表」，只有财务报表；用成本结构 × 经手量估算
+
+企业层面特别说明：**不存在「企业投入产出表」这种东西**。企业有资产负债表、
+利润表、现金流量表；投入产出表是国民经济核算工具，编制主体是国家/地区。
+所以这里的企业金额是用「年经手量 × 市场均价」得到的采购金额估算，
+不是从任何企业投入产出表里读出来的。
+
+金额是怎么算出来的
+------------------
+    消耗金额(亿元) = Σ(分类消耗量(万吨) × 参考价(元/公斤) × 0.1)
+
+参考价来自 `knowledge.py` 的回收价区间中值，属市场参考价。
+全国消耗量取中国造纸协会年度报告的「废纸消费量」（2024 年为 7030 万吨），
+未公布消费量的年份退回使用回收量，并在 `tonnage_basis` 里注明。
+
+直接消耗系数
+------------
+    直接消耗系数 = 废纸采购金额 ÷ 造纸和纸制品业营业收入
+
+这是本模块唯一能由公开数据直接推出、且量纲自洽的投入产出系数。
+2024 年：营业收入 1.46 万亿元（中国造纸协会 2024 年度报告）。
+"""
+
+import csv
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from . import enterprises, regions
+from . import stats as stats_mod
+
+# --------------------------------------------------------------------------
+# 一、官方口径的聚合指标
+# --------------------------------------------------------------------------
+# 来源：中国造纸协会《中国造纸工业2024年度报告》（2025-05-07 发布）
+#   全行业营业收入 1.46 万亿元，利润总额 520 亿元，
+#   纸及纸板产量 13625 万吨，纸制品产量 6514 万吨。
+#   废纸回收量 6971 万吨，回收率 51.1%，利用率 51.6%。
+# 投入产出表：国家统计局 2023 年全国投入产出表（42 部门）。
+NATIONAL_IO: Dict[str, object] = {
+    "year": 2024,
+    "paper_revenue": 14600.0,          # 亿元
+    "paper_profit": 520.0,             # 亿元
+    "paper_output": 13625.0,           # 万吨，纸及纸板
+    "paper_products_output": 6514.0,   # 万吨，纸制品
+    "wastepaper_recovery": 6971.0,     # 万吨
+    "wastepaper_consumption": 7030.0,  # 万吨
+    "recovery_rate": 51.1,             # %
+    "utilization": 51.6,               # %
+    "io_table_year": 2023,
+    "io_sector_count": 42,
+}
+
+# 各年营业收入（亿元）。仅 2024 年有公开报道值，其余年份不推算，保持 None。
+PAPER_REVENUE: Dict[int, Optional[float]] = {
+    2024: 14600.0,
+}
+
+SOURCES: List[str] = [
+    "国家统计局《2023年全国投入产出表》（42 部门）",
+    "国家统计局《中国地区投入产出表》（分省，42 部门，逐省公开出版）",
+    "国家统计局咨询公开（2024-08）：地级市暂不编制投入产出表",
+    "中国造纸协会《中国造纸工业2024年度报告》：营业收入 1.46 万亿元、利润 520 亿元",
+    "参考价取 knowledge.py 回收价区间中值，为市场参考价",
+]
+
+# 四级口径与数据可得性
+LEVELS: List[Dict[str, object]] = [
+    {
+        "key": "national",
+        "name": "全国",
+        "io_available": True,
+        "provenance": "官方",
+        "note": "全国投入产出表（42 部门）+ 中国造纸协会年度报告",
+    },
+    {
+        "key": "province",
+        "name": "省级",
+        "io_available": True,
+        "provenance": "官方（表）+ 估算（分摊）",
+        "note": "各省均编制本地区投入产出表；本工具的分省金额按回收量占比分摊，非实际采购分布",
+    },
+    {
+        "key": "city",
+        "name": "地级市",
+        "io_available": False,
+        "provenance": "估算",
+        "note": "国家统计局：地级市暂不编制投入产出表。按企业名录城市分布分摊",
+    },
+    {
+        "key": "enterprise",
+        "name": "企业",
+        "io_available": False,
+        "provenance": "示例",
+        "note": "企业无投入产出表（只有财务报表）。按年经手量 × 市场均价估算采购金额",
+    },
+]
+
+PROVENANCE_OFFICIAL = "官方"
+PROVENANCE_DERIVED = "测算（公开数据推导）"
+PROVENANCE_ESTIMATED = "估算（分摊）"
+PROVENANCE_DEMO = "示例"
+
+# --------------------------------------------------------------------------
+# 二、金额与系数
+# --------------------------------------------------------------------------
+
+
+def _history_row(year: int) -> Optional[Dict[str, object]]:
+    for row in stats_mod.get_history():
+        if int(row["year"]) == year:  # type: ignore[arg-type]
+            return row
+    return None
+
+
+def tonnage(year: int) -> Tuple[float, str]:
+    """返回 (消耗量万吨, 口径说明)。优先用废纸消费量，缺失时退回回收量。"""
+    row = _history_row(year)
+    if row is None:
+        return 0.0, "无数据"
+    consumption = row.get("consumption")
+    if consumption is not None:
+        return float(consumption), "废纸消费量（年度报告）"
+    recovery = row.get("recovery")
+    if recovery is not None:
+        return float(recovery), "回收量（该年消费量未公布，以回收量代替）"
+    return 0.0, "无数据"
+
+
+def average_price(year: int) -> float:
+    """加权平均参考价（元/吨）。按分类结构加权。"""
+    amount, _ = tonnage(year)
+    if amount <= 0:
+        return 0.0
+    value = sum(float(r["value"]) for r in stats_mod.category_breakdown(year, total=amount))
+    # value 单位为亿元，amount 单位为万吨 → 亿元/万吨 × 10000 = 元/吨
+    return round(value / amount * 10000, 1)
+
+
+def spend(year: int = 2024) -> Dict[str, object]:
+    """全国废纸货值（亿元），按回收参考价计价。
+
+    注意：参考价是居民/回收站口径，纸厂「到厂价」还包含分拣、打包、运输，
+    通常显著更高。本工具不额外乘一个加价系数——那会引入没有依据的假设，
+    所以这里给出的是**纸厂废纸成本的下限**。
+    """
+    amount, basis = tonnage(year)
+    rows = stats_mod.category_breakdown(year, total=amount)
+    value = sum(float(r["value"]) for r in rows)
+    return {
+        "year": year,
+        "tonnage": round(amount, 1),
+        "tonnage_basis": basis,
+        "avg_price": average_price(year),
+        "amount": round(value, 1),
+        "is_lower_bound": True,
+        "provenance": PROVENANCE_DERIVED,
+        "note": "金额 = Σ(分类消耗量 × 回收参考价)。参考价为居民/回收站口径，"
+                "不含分拣、打包、运输，故该金额是纸厂废纸成本的下限，非到厂采购额。",
+    }
+
+
+def revenue(year: int = 2024) -> Optional[float]:
+    """造纸和纸制品业营业收入（亿元）。仅有公开报道值的年份返回数字。"""
+    return PAPER_REVENUE.get(year)
+
+
+def direct_coefficient(year: int = 2024) -> Dict[str, object]:
+    """造纸和纸制品业对废纸的直接消耗系数 = 采购金额 ÷ 营业收入。"""
+    rev = revenue(year)
+    if not rev:
+        return {
+            "year": year,
+            "coefficient": None,
+            "provenance": "无数据",
+            "note": "%d 年造纸业营业收入无公开报道值，无法计算直接消耗系数" % year,
+        }
+    amount = float(spend(year)["amount"])
+    return {
+        "year": year,
+        "spend": round(amount, 1),
+        "revenue": rev,
+        "coefficient": round(amount / rev, 4),
+        "coefficient_pct": round(amount / rev * 100, 2),
+        "is_lower_bound": True,
+        "provenance": PROVENANCE_DERIVED,
+        "note": "直接消耗系数 = 废纸货值 ÷ 造纸和纸制品业营业收入。"
+                "因货值按回收参考价计，该系数是下限；到厂价口径下会更高。",
+    }
+
+
+def unit_consumption(year: int = 2024) -> Dict[str, object]:
+    """单位产值废纸消耗（吨/万元）。"""
+    amount, _ = tonnage(year)
+    rev = revenue(year)
+    if not rev:
+        return {"year": year, "value": None, "provenance": "无数据"}
+    return {
+        "year": year,
+        "tonnage": round(amount, 1),
+        "revenue": rev,
+        # 万吨 / 亿元 = 吨/万元（量纲相同，均为 10^4）
+        "value": round(amount / rev, 3),
+        "provenance": PROVENANCE_DERIVED,
+        "note": "单位产值废纸消耗 = 废纸消耗量(万吨) ÷ 营业收入(亿元)，量纲为吨/万元",
+    }
+
+
+# --------------------------------------------------------------------------
+# 三、分省 / 分市 / 分企业
+# --------------------------------------------------------------------------
+
+
+def province_spend(year: int = 2024, code: Optional[str] = None) -> Dict[str, object]:
+    """分省消耗金额（亿元）。
+
+    分摊口径：按该省废纸回收量占全国比重代理。
+    这不是真实采购分布（废纸可能跨省流通），仅用于结构参考。
+    """
+    total = float(spend(year)["amount"])
+    rows: List[Dict[str, object]] = []
+    for node in regions.get_children("CN"):
+        share = float(node["stats"]["占全国比重(%)"]) / 100.0  # type: ignore[index]
+        rows.append({
+            "code": node["code"],
+            "name": node["name"],
+            "tier_label": node["tier_label"],
+            "quality": node["quality"],
+            "share_pct": round(share * 100, 2),
+            "recovery": node["stats"]["回收量(万吨)"],  # type: ignore[index]
+            "amount": round(total * share, 1),
+            "provenance": (
+                PROVENANCE_OFFICIAL if node["quality"] == "reported"
+                else PROVENANCE_ESTIMATED
+            ),
+        })
+    rows.sort(key=lambda r: float(r["amount"]), reverse=True)  # type: ignore[arg-type]
+    for i, row in enumerate(rows, start=1):
+        row["rank"] = i
+
+    if code:
+        picked = [r for r in rows if r["code"] == code]
+        return {
+            "year": year,
+            "basis": "按该省回收量占全国比重分摊，非实际采购分布",
+            "total": round(total, 1),
+            "rows": picked,
+            "provenance": PROVENANCE_ESTIMATED,
+        }
+    return {
+        "year": year,
+        "basis": "按该省回收量占全国比重分摊，非实际采购分布",
+        "total": round(total, 1),
+        "rows": rows,
+        "provenance": PROVENANCE_ESTIMATED,
+    }
+
+
+def city_spend(province_code: str, year: int = 2024) -> Dict[str, object]:
+    """省内各城市的消耗金额（亿元）。
+
+    地级市不编制投入产出表，这里按该省企业名录的年经手量在城市间的分布分摊。
+    企业名录本身是示例数据，因此结果是「示例 × 估算」。
+    """
+    prov = regions.get_node(province_code)
+    if prov is None or prov["level"] != "province":
+        return {
+            "year": year,
+            "province": None,
+            "cities": [],
+            "provenance": "无数据",
+            "note": "请传入省级行政区代码",
+        }
+
+    share = float(prov["stats"]["占全国比重(%)"]) / 100.0  # type: ignore[index]
+    total = float(spend(year)["amount"]) * share
+    rows = enterprises.list_enterprises(str(prov["code"]))
+    by_city: Dict[str, float] = {}
+    for e in rows:
+        by_city[str(e["city"])] = by_city.get(str(e["city"]), 0.0) + float(e["volume"])
+
+    vol_sum = sum(by_city.values())
+    cities: List[Dict[str, object]] = []
+    for city, vol in by_city.items():
+        ratio = (vol / vol_sum) if vol_sum else 0.0
+        cities.append({
+            "city": city,
+            "enterprise_volume": round(vol, 1),
+            "amount": round(total * ratio, 2),
+            "provenance": PROVENANCE_ESTIMATED,
+        })
+    cities.sort(key=lambda r: float(r["amount"]), reverse=True)  # type: ignore[arg-type]
+
+    return {
+        "year": year,
+        "province": prov["name"],
+        "province_amount": round(total, 1),
+        "cities": cities,
+        "provenance": PROVENANCE_ESTIMATED,
+        "note": "地级市不编制投入产出表；此处按企业名录城市分布分摊，企业名录为示例数据",
+    }
+
+
+def enterprise_spend(year: int = 2024, etype: Optional[str] = None) -> Dict[str, object]:
+    """企业采购金额（亿元）= 年经手量(万吨) × 均价(元/吨) ÷ 10000。"""
+    price = average_price(year)
+    rows: List[Dict[str, object]] = []
+    for e in enterprises.list_enterprises(None, None, etype):
+        volume = float(e["volume"])
+        node = regions.get_node(str(e["province_code"]))
+        rows.append({
+            "name": e["name"],
+            "province": node["name"] if node else "—",
+            "city": e["city"],
+            "type": e["type"],
+            "volume": round(volume, 1),
+            "avg_price": price,
+            "amount": round(volume * price / 10000, 2),
+            "is_demo": e["is_demo"],
+            "provenance": PROVENANCE_DEMO if e["is_demo"] else PROVENANCE_ESTIMATED,
+        })
+    rows.sort(key=lambda r: float(r["amount"]), reverse=True)  # type: ignore[arg-type]
+    return {
+        "year": year,
+        "avg_price": price,
+        "total": round(sum(float(r["amount"]) for r in rows), 1),
+        "rows": rows,
+        "provenance": PROVENANCE_DEMO,
+        "note": "企业不存在投入产出表；金额 = 年经手量 × 市场均价，属采购金额估算",
+    }
+
+
+# --------------------------------------------------------------------------
+# 四、Leontief 逆矩阵与产业关联（需要用户导入真实投入产出表）
+# --------------------------------------------------------------------------
+# 本仓库不内置任何投入产出矩阵：编一张看起来权威的假矩阵，比不提供更糟。
+# 算法在这里，数据请从国家统计局 42 部门表导出为 CSV 后导入。
+
+
+def load_matrix_csv(path: str) -> Tuple[List[str], List[List[float]]]:
+    """读取直接消耗系数矩阵 CSV。
+
+    格式：第一行是部门名（列），第一列是部门名（行），其余为系数。
+    """
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        reader = csv.reader(fh)
+        header = next(reader)
+        names = header[1:]
+        matrix: List[List[float]] = []
+        for row in reader:
+            if not row or not row[0].strip():
+                continue
+            matrix.append([float(x) for x in row[1:]])
+    if not matrix:
+        raise ValueError("矩阵为空：%s" % path)
+    n = len(matrix)
+    if any(len(r) != n for r in matrix):
+        raise ValueError("矩阵不是方阵：行数 %d，列数不一致" % n)
+    return names, matrix
+
+
+def leontief_inverse(matrix: Sequence[Sequence[float]]) -> List[List[float]]:
+    """计算 (I - A)^-1，即列昂惕夫逆矩阵（完全需求系数矩阵）。
+
+    纯标准库实现：带部分主元的高斯-约当消元。A 为直接消耗系数矩阵。
+    """
+    n = len(matrix)
+    if n == 0:
+        raise ValueError("矩阵为空")
+    # 构造 [I - A | I]
+    aug: List[List[float]] = []
+    for i in range(n):
+        if len(matrix[i]) != n:
+            raise ValueError("矩阵不是方阵")
+        row = [-(float(matrix[i][j])) for j in range(n)]
+        row[i] += 1.0
+        row.extend(1.0 if k == i else 0.0 for k in range(n))
+        aug.append(row)
+
+    for col in range(n):
+        # 部分主元
+        pivot = max(range(col, n), key=lambda r: abs(aug[r][col]))
+        if abs(aug[pivot][col]) < 1e-12:
+            raise ValueError("矩阵奇异：第 %d 列无法消元（可能存在不合理的消耗系数）" % (col + 1))
+        if pivot != col:
+            aug[col], aug[pivot] = aug[pivot], aug[col]
+        factor = aug[col][col]
+        aug[col] = [v / factor for v in aug[col]]
+        for r in range(n):
+            if r == col:
+                continue
+            ratio = aug[r][col]
+            if ratio == 0.0:
+                continue
+            aug[r] = [a - ratio * b for a, b in zip(aug[r], aug[col])]
+
+    return [row[n:] for row in aug]
+
+
+def influence_coefficients(matrix: Sequence[Sequence[float]]) -> List[float]:
+    """影响力系数 = 逆矩阵列和 ÷ 全部列和均值。>1 表示对上游拉动高于社会平均。"""
+    inv = leontief_inverse(matrix)
+    n = len(inv)
+    col_sums = [sum(inv[i][j] for i in range(n)) for j in range(n)]
+    mean = sum(col_sums) / n
+    return [round(s / mean, 4) for s in col_sums]
+
+
+def response_coefficients(matrix: Sequence[Sequence[float]]) -> List[float]:
+    """感应度系数 = 逆矩阵行和 ÷ 全部行和均值。>1 表示受下游需求拉动高于社会平均。"""
+    inv = leontief_inverse(matrix)
+    n = len(inv)
+    row_sums = [sum(inv[i]) for i in range(n)]
+    mean = sum(row_sums) / n
+    return [round(s / mean, 4) for s in row_sums]
+
+
+# --------------------------------------------------------------------------
+# 五、汇总
+# --------------------------------------------------------------------------
+
+
+def overview(year: int = 2024) -> Dict[str, object]:
+    """投入产出总览：一次返回界面需要的全部口径。"""
+    return {
+        "national_io": dict(NATIONAL_IO),
+        "levels": LEVELS,
+        "sources": SOURCES,
+        "spend": spend(year),
+        "direct_coefficient": direct_coefficient(year),
+        "unit_consumption": unit_consumption(year),
+        "provinces": province_spend(year),
+        "enterprises": enterprise_spend(year),
+        "years": [int(r["year"]) for r in stats_mod.get_history()],
+    }
+
+
+def summary_text(year: int = 2024) -> str:
+    """命令行输出。"""
+    s = spend(year)
+    d = direct_coefficient(year)
+    u = unit_consumption(year)
+    lines = [
+        "【投入产出视角：废纸消耗金额（%d 年）】" % year,
+        "消耗量　　%s 万吨（%s）" % (s["tonnage"], s["tonnage_basis"]),
+        "平均参考价　%s 元/吨" % s["avg_price"],
+        "消耗金额　%s 亿元　[%s]" % (s["amount"], s["provenance"]),
+    ]
+    if d["coefficient"] is not None:
+        lines.append(
+            "直接消耗系数　%s%%（采购 %s 亿元 ÷ 营业收入 %s 亿元，属下限）"
+            % (d["coefficient_pct"], d["spend"], d["revenue"])
+        )
+    if u["value"] is not None:
+        lines.append("单位产值消耗　%s 吨/万元" % u["value"])
+    lines.append("")
+    lines.append("口径分级：")
+    for lv in LEVELS:
+        flag = "有官方表" if lv["io_available"] else "无官方表"
+        lines.append("  · %s（%s）%s —— %s" % (lv["name"], flag, lv["provenance"], lv["note"]))
+    return "\n".join(lines)
+
+
+def matrix_path() -> Path:
+    """用户导入的真实投入产出表位置（不纳入版本库）。"""
+    return Path(__file__).resolve().parents[2] / "data" / "io_matrix.csv"
 ```
 
 ### `src/paper_recycle_agent/knowledge.py`（99 行）
@@ -1243,6 +1824,371 @@ CATEGORIES: List[PaperCategory] = [
 
 # 扁平化的「类别-关键词」索引，供分类引擎快速匹配。
 KEYWORD_INDEX = [(cat, kw) for cat in CATEGORIES for kw in cat.aliases]
+```
+
+### `src/paper_recycle_agent/llm.py`（360 行）
+
+```python
+"""模型配置模块：接入任意 OpenAI 兼容的大模型 API。
+
+设计要点
+--------
+1. **零第三方依赖**：用标准库 `urllib.request` 发请求，不引入 requests / openai SDK。
+   这样「Python 3.7 + 什么都不装」的承诺不会因为接了大模型而破功。
+2. **密钥不出现在任何输出里**：`public_config()` 只返回脱敏值（`sk-…3f9a`），
+   报错信息也会先把密钥替换掉再返回。日志、接口响应、异常里都不会带明文。
+3. **没配置也能用**：`chat()` 在未配置时返回 `configured=False`，
+   上层自动回落到 `agent.py` 的规则引擎。整个工具不会因为「没填 API Key」而不可用。
+4. **配置来源优先级**：环境变量 > config/llm.json > 默认值。
+   环境变量适合 CI / 服务器；JSON 适合本地图形界面里填。
+
+安全提醒（README 里也写了）
+--------------------------
+前端明文保存的密钥可被同机程序读取。本模块把配置存在服务端文件
+（`config/llm.json`，已加入 .gitignore），接口只回脱敏值。
+如果要把服务暴露到公网，请自行加鉴权，或改用只读环境变量方式。
+"""
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional
+
+ENV_BASE_URL = "PAPER_LLM_BASE_URL"
+ENV_API_KEY = "PAPER_LLM_API_KEY"
+ENV_MODEL = "PAPER_LLM_MODEL"
+
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_TIMEOUT = 30.0
+
+# 仓库根目录下的 config/llm.json（不纳入版本库）
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "llm.json"
+
+DEFAULT_SYSTEM_PROMPT = (
+    "你是废纸回收领域的助手，服务对象包括回收企业、造纸厂、行业协会和统计部门。"
+    "回答要求：\n"
+    "1. 涉及数据时，先说明口径（官方 / 测算 / 估算 / 示例），不确定就直说不确定；\n"
+    "2. 不要编造具体省份的回收量、企业采购量或价格；\n"
+    "3. 回答简洁，能用一两句说清就不要展开；\n"
+    "4. 中文回答。"
+)
+
+# 常见服务商的默认地址，供界面下拉选择
+PRESETS: List[Dict[str, str]] = [
+    {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
+    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
+    {"name": "通义千问（DashScope 兼容模式）",
+     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "model": "qwen-plus"},
+    {"name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4-flash"},
+    {"name": "Kimi（Moonshot）", "base_url": "https://api.moonshot.cn/v1", "model": "moonshot-v1-8k"},
+    {"name": "本地 Ollama", "base_url": "http://127.0.0.1:11434/v1", "model": "qwen2.5"},
+]
+
+
+def mask_key(key: Optional[str]) -> str:
+    """把密钥脱敏成 sk-…3f9a 形式；空值返回空串。"""
+    if not key:
+        return ""
+    text = str(key)
+    if len(text) <= 8:
+        return "…" + text[-2:] if len(text) > 2 else "…"
+    return text[:3] + "…" + text[-4:]
+
+
+@dataclass
+class LLMConfig:
+    base_url: str = DEFAULT_BASE_URL
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    temperature: float = 0.3
+    max_tokens: int = 600
+    timeout: float = DEFAULT_TIMEOUT
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    source: str = field(default="default", compare=False)
+
+    def endpoint(self) -> str:
+        """补全为 …/chat/completions。兼容用户填 /v1 或填完整路径。"""
+        base = self.base_url.strip().rstrip("/")
+        if base.endswith("/chat/completions"):
+            return base
+        return base + "/chat/completions"
+
+    def configured(self) -> bool:
+        return bool(self.api_key.strip())
+
+    def public(self) -> Dict[str, object]:
+        """对外暴露的配置：绝不含明文密钥。"""
+        return {
+            "base_url": self.base_url,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "timeout": self.timeout,
+            "system_prompt": self.system_prompt,
+            "api_key_masked": mask_key(self.api_key),
+            "has_api_key": bool(self.api_key),
+            "configured": self.configured(),
+            "source": self.source,
+        }
+
+
+def _from_env() -> Optional[LLMConfig]:
+    base = os.environ.get(ENV_BASE_URL, "").strip()
+    key = os.environ.get(ENV_API_KEY, "").strip()
+    model = os.environ.get(ENV_MODEL, "").strip()
+    if not (base or key or model):
+        return None
+    return LLMConfig(
+        base_url=base or DEFAULT_BASE_URL,
+        api_key=key,
+        model=model or DEFAULT_MODEL,
+        source="env",
+    )
+
+
+def _from_file() -> Optional[LLMConfig]:
+    if not CONFIG_PATH.exists():
+        return None
+    try:
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return LLMConfig(
+        base_url=str(raw.get("base_url") or DEFAULT_BASE_URL),
+        api_key=str(raw.get("api_key") or ""),
+        model=str(raw.get("model") or DEFAULT_MODEL),
+        temperature=float(raw.get("temperature", 0.3)),
+        max_tokens=int(raw.get("max_tokens", 600)),
+        timeout=float(raw.get("timeout", DEFAULT_TIMEOUT)),
+        system_prompt=str(raw.get("system_prompt") or DEFAULT_SYSTEM_PROMPT),
+        source="file",
+    )
+
+
+def load_config() -> LLMConfig:
+    """环境变量 > config/llm.json > 默认值。"""
+    return _from_env() or _from_file() or LLMConfig()
+
+
+def save_config(base_url: str, api_key: Optional[str], model: str,
+                temperature: float = 0.3, max_tokens: int = 600,
+                timeout: float = DEFAULT_TIMEOUT,
+                system_prompt: Optional[str] = None) -> LLMConfig:
+    """保存配置到 config/llm.json。
+
+    `api_key` 传 None 或空串时，保留原有密钥（避免界面上只改模型却把密钥清掉）。
+    """
+    current = _from_file() or LLMConfig()
+    key = current.api_key if not api_key else str(api_key)
+    cfg = LLMConfig(
+        base_url=(base_url or DEFAULT_BASE_URL).strip(),
+        api_key=key.strip(),
+        model=(model or DEFAULT_MODEL).strip(),
+        temperature=float(temperature),
+        max_tokens=int(max_tokens),
+        timeout=float(timeout),
+        system_prompt=(system_prompt or DEFAULT_SYSTEM_PROMPT),
+        source="file",
+    )
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(
+        json.dumps(
+            {
+                "base_url": cfg.base_url,
+                "api_key": cfg.api_key,
+                "model": cfg.model,
+                "temperature": cfg.temperature,
+                "max_tokens": cfg.max_tokens,
+                "timeout": cfg.timeout,
+                "system_prompt": cfg.system_prompt,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    try:  # 尽量收紧权限（Windows 上 chmod 语义有限，失败不影响功能）
+        os.chmod(str(CONFIG_PATH), 0o600)
+    except OSError:
+        pass
+    return cfg
+
+
+def clear_config() -> bool:
+    """删除本地配置文件。环境变量方式不受影响。"""
+    if CONFIG_PATH.exists():
+        CONFIG_PATH.unlink()
+        return True
+    return False
+
+
+def _scrub(text: str, key: str) -> str:
+    """把可能出现在报错文本里的密钥替换掉。"""
+    if key and key in text:
+        return text.replace(key, mask_key(key))
+    return text
+
+
+def _post(url: str, payload: Dict[str, object], key: str, timeout: float):
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + key,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def chat(messages: List[Dict[str, str]],
+         config: Optional[LLMConfig] = None,
+         use_system_prompt: bool = True) -> Dict[str, object]:
+    """调用 /chat/completions。
+
+    返回结构：
+        {"ok": bool, "configured": bool, "reply": str, "error": str,
+         "model": str, "latency_ms": int, "usage": {...}}
+
+    未配置密钥时 `ok=False, configured=False`，调用方应回落到规则引擎。
+    """
+    cfg = config or load_config()
+    if not cfg.configured():
+        return {
+            "ok": False,
+            "configured": False,
+            "reply": "",
+            "error": "未配置模型 API：请在「设置」里填写 Base URL 与 API Key，"
+                     "或设置环境变量 %s。" % ENV_API_KEY,
+            "model": cfg.model,
+            "latency_ms": 0,
+            "usage": {},
+        }
+
+    payload_msgs: List[Dict[str, str]] = []
+    if use_system_prompt and cfg.system_prompt:
+        payload_msgs.append({"role": "system", "content": cfg.system_prompt})
+    payload_msgs.extend(messages)
+
+    payload = {
+        "model": cfg.model,
+        "messages": payload_msgs,
+        "temperature": cfg.temperature,
+        "max_tokens": cfg.max_tokens,
+        "stream": False,
+    }
+
+    started = time.time()
+    try:
+        data = _post(cfg.endpoint(), payload, cfg.api_key, cfg.timeout)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:400]
+        except Exception:  # pragma: no cover - 读取失败时忽略
+            detail = ""
+        hint = {
+            401: "密钥无效或已过期",
+            403: "密钥无权限访问该模型",
+            404: "Base URL 或模型名不正确",
+            429: "触发限流或余额不足",
+        }.get(exc.code, "HTTP %d" % exc.code)
+        return {
+            "ok": False,
+            "configured": True,
+            "reply": "",
+            "error": _scrub("%s（%s）%s" % (hint, exc.code, detail), cfg.api_key),
+            "model": cfg.model,
+            "latency_ms": int((time.time() - started) * 1000),
+            "usage": {},
+        }
+    except urllib.error.URLError as exc:
+        return {
+            "ok": False,
+            "configured": True,
+            "reply": "",
+            "error": _scrub("连接失败：%s（检查 Base URL 与网络）" % exc.reason, cfg.api_key),
+            "model": cfg.model,
+            "latency_ms": int((time.time() - started) * 1000),
+            "usage": {},
+        }
+    except Exception as exc:  # pragma: no cover - 兜底，避免接口 500
+        return {
+            "ok": False,
+            "configured": True,
+            "reply": "",
+            "error": _scrub("调用异常：%s" % exc, cfg.api_key),
+            "model": cfg.model,
+            "latency_ms": int((time.time() - started) * 1000),
+            "usage": {},
+        }
+
+    latency = int((time.time() - started) * 1000)
+    try:
+        reply = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return {
+            "ok": False,
+            "configured": True,
+            "reply": "",
+            "error": "返回结构不符合 OpenAI 兼容格式（缺少 choices[0].message.content）",
+            "model": cfg.model,
+            "latency_ms": latency,
+            "usage": {},
+        }
+
+    return {
+        "ok": True,
+        "configured": True,
+        "reply": str(reply).strip(),
+        "error": "",
+        "model": cfg.model,
+        "latency_ms": latency,
+        "usage": data.get("usage") or {},
+    }
+
+
+def probe(config: Optional[LLMConfig] = None) -> Dict[str, object]:
+    """连通性探测：发一句最短的请求，看能不能通。"""
+    cfg = config or load_config()
+    result = chat(
+        [{"role": "user", "content": "回复两个字：可用"}],
+        config=cfg,
+        use_system_prompt=False,
+    )
+    return {
+        "ok": result["ok"],
+        "configured": result["configured"],
+        "model": result["model"],
+        "latency_ms": result["latency_ms"],
+        "reply": result["reply"][:60],
+        "error": result["error"],
+        "endpoint": cfg.endpoint(),
+        "api_key_masked": mask_key(cfg.api_key),
+    }
+
+
+def status() -> Dict[str, object]:
+    """给界面用的状态：是否配置、当前来源、可选预设。"""
+    cfg = load_config()
+    return {
+        "config": cfg.public(),
+        "presets": PRESETS,
+        "config_path": str(CONFIG_PATH),
+        "env_vars": [ENV_BASE_URL, ENV_API_KEY, ENV_MODEL],
+        "ready": cfg.configured(),
+    }
 ```
 
 ### `src/paper_recycle_agent/pricing.py`（47 行）
@@ -1874,7 +2820,7 @@ SOURCES: List[str] = [
 
 ## 二、Web 应用（app/）
 
-### `app/server.py`（220 行）
+### `app/server.py`（412 行）
 
 ```python
 """FastAPI 服务：废纸回收 Agent 的图形界面与对话接口。
@@ -1884,12 +2830,21 @@ SOURCES: List[str] = [
   GET  /api/info         -> {categories, quality, sources, years, national_year}
   GET  /api/regions      -> 区域树（全国 → 省）
   GET  /api/stats        -> 区域统计 + 历年序列 + 分类拆分（?code=CN&year=2024）
+  GET  /api/enterprises  -> 企业名录与按省/类/型汇总
+  GET  /api/io           -> 投入产出：消耗金额、直接消耗系数、分省/分市/分企业（?year=&code=）
+  GET  /api/map/config   -> 地图接入配置（供应商、key 占位符、审图号说明）
+  GET  /api/map/data     -> 省级消耗金额 + 中心点坐标（供地图打点）
+  GET  /api/llm/config   -> 模型配置状态（密钥脱敏）
+  POST /api/llm/config   -> 保存模型配置
+  POST /api/llm/test     -> 连通性探测
+  POST /api/llm/chat     -> 走大模型回答（未配置时回落规则引擎）
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
-  POST /chat             -> {"reply": "..."}
+  POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
 """
 
 import io
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -1900,7 +2855,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import enterprises, exporter, regions, respond
+from paper_recycle_agent import (enterprises, exporter, io_table, llm, regions,
+                                 respond)
 from paper_recycle_agent import stats as stats_mod
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -2038,6 +2994,188 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
     }
 
 
+@app.get("/api/io")
+def io_overview(year: Optional[int] = None, code: Optional[str] = None) -> dict:
+    """投入产出视角：消耗金额、直接消耗系数、分省 / 分市 / 分企业。"""
+    if year is None:
+        year = io_table.NATIONAL_IO["year"]  # type: ignore[assignment]
+    year = int(year)
+    valid = {int(r["year"]) for r in stats_mod.get_history()}
+    if year not in valid:
+        year = max(valid)
+
+    data = io_table.overview(year)
+    # 选中某省时，附带该省的城市分摊
+    node = regions.get_node(code) if code else None
+    if node is not None and node["level"] == "province":
+        data["cities"] = io_table.city_spend(str(node["code"]), year)
+        data["scope"] = node["name"]
+    else:
+        data["cities"] = None
+        data["scope"] = "全国"
+    return data
+
+
+# 地图：合规要求只能用腾讯 / 高德 / 百度 / 天地图，且不得内置可用密钥。
+# 这里只提供「接入说明 + 占位符」，真实 key 由用户在设置里填。
+_MAP_PLACEHOLDER = (
+    "Please apply for your own key at the Tencent Location Service Open Platform "
+    "and replace this placeholder"
+)
+_MAP_ATTRIBUTION = (
+    "底图由腾讯位置服务提供（已取得测绘资质与审图号），"
+    "本工具仅在其上叠加统计数据，不自行绘制任何国界或行政区划界线。"
+)
+
+
+@app.get("/api/map/config")
+def map_config() -> dict:
+    """地图接入配置。密钥优先取环境变量，其次由前端在设置里填写。"""
+    env_key = os.environ.get("TMAP_KEY", "").strip()
+    return {
+        "provider": "tencent",
+        "sdk_url": "https://map.qq.com/api/gljs?v=1.exp",
+        "key": env_key,
+        "key_source": "env" if env_key else "none",
+        "key_placeholder": _MAP_PLACEHOLDER,
+        "apply_url": "https://lbs.qq.com/dev/console/application/mine",
+        "attribution": _MAP_ATTRIBUTION,
+        "fallback": "未配置密钥时，地图页降级为「省份消耗金额排行」，不绘制任何边界。",
+    }
+
+
+@app.get("/api/map/data")
+def map_data(year: Optional[int] = None) -> dict:
+    """省级消耗金额 + 中心点坐标（GCJ-02），供地图打点使用。"""
+    if year is None:
+        year = io_table.NATIONAL_IO["year"]  # type: ignore[assignment]
+    year = int(year)
+    rows = io_table.province_spend(year)["rows"]
+    max_amount = max((float(r["amount"]) for r in rows), default=0.0)
+
+    points = []
+    for r in rows:
+        centroid = enterprises.PROVINCE_CENTROID.get(str(r["code"]))
+        if not centroid:
+            continue
+        amount = float(r["amount"])
+        points.append({
+            "code": r["code"],
+            "name": r["name"],
+            "amount": amount,
+            "share_pct": r["share_pct"],
+            "rank": r["rank"],
+            # 归一化半径，供前端画圆
+            "ratio": round(amount / max_amount, 4) if max_amount else 0.0,
+            "lat": centroid[0],
+            "lon": centroid[1],
+            "provenance": r["provenance"],
+        })
+
+    return {
+        "year": year,
+        "unit": "亿元",
+        "points": points,
+        "max_amount": round(max_amount, 1),
+        "coordinate_system": "GCJ-02",
+        "attribution": _MAP_ATTRIBUTION,
+        "note": "省份坐标取省会近似位置，仅用于打点示意，不代表实际厂址。",
+    }
+
+
+class LLMConfigReq(BaseModel):
+    base_url: str = ""
+    api_key: Optional[str] = None
+    model: str = ""
+    temperature: float = 0.3
+    max_tokens: int = 600
+    timeout: float = 30.0
+    system_prompt: Optional[str] = None
+
+
+class LLMChatReq(BaseModel):
+    message: str
+
+
+@app.get("/api/llm/config")
+def llm_config() -> dict:
+    """模型配置状态。密钥只返回脱敏值。"""
+    return llm.status()
+
+
+@app.post("/api/llm/config")
+def llm_config_save(req: LLMConfigReq) -> dict:
+    cfg = llm.save_config(
+        base_url=req.base_url,
+        api_key=req.api_key,
+        model=req.model,
+        temperature=req.temperature,
+        max_tokens=req.max_tokens,
+        timeout=req.timeout,
+        system_prompt=req.system_prompt,
+    )
+    return {"ok": True, "config": cfg.public()}
+
+
+@app.post("/api/llm/config/clear")
+def llm_config_clear() -> dict:
+    removed = llm.clear_config()
+    return {"ok": True, "removed": removed, "config": llm.load_config().public()}
+
+
+@app.post("/api/llm/test")
+def llm_test() -> dict:
+    """连通性探测：能通返回 ok=True 与延迟。"""
+    return llm.probe()
+
+
+@app.post("/api/llm/chat")
+def llm_chat(req: LLMChatReq) -> dict:
+    """走大模型回答；未配置或调用失败时回落到规则引擎，并说明原因。"""
+    message = (req.message or "").strip()
+    if not message:
+        return {"ok": False, "reply": "请输入内容。", "engine": "none"}
+
+    # 把当前数据上下文喂给模型，减少胡编（数字全部取自模块，避免写死后过期）
+    io_nat = io_table.NATIONAL_IO
+    context = (
+        "以下是本工具的数据口径，回答时以此为准，不要自行编造数字："
+        "2024 年全国废纸回收量 {rec} 万吨，回收率 {rr}%，利用率 {ut}%；"
+        "造纸和纸制品业营业收入 {rev} 亿元；"
+        "废纸货值约 {amt} 亿元（按回收参考价计价，是纸厂废纸成本的下限，非到厂采购额）。"
+        "省级回收量为「公开报道 + 梯队测算」，分类回收量为估算，企业名录为示例数据。"
+    ).format(
+        rec=io_nat["wastepaper_recovery"],
+        rr=io_nat["recovery_rate"],
+        ut=io_nat["utilization"],
+        rev=io_nat["paper_revenue"],
+        amt=io_table.spend(2024)["amount"],
+    )
+    result = llm.chat([
+        {"role": "system", "content": context},
+        {"role": "user", "content": message},
+    ])
+    if result["ok"]:
+        return {
+            "ok": True,
+            "engine": "llm",
+            "model": result["model"],
+            "latency_ms": result["latency_ms"],
+            "reply": result["reply"],
+        }
+
+    # 回落：规则引擎永远可用
+    fallback = respond(message)
+    return {
+        "ok": True,
+        "engine": "rule",
+        "model": result.get("model", ""),
+        "latency_ms": result.get("latency_ms", 0),
+        "reply": fallback,
+        "llm_error": result.get("error", ""),
+    }
+
+
 @app.get("/export.xlsx")
 def export(code: str = "CN", year: Optional[int] = None) -> Response:
     node = regions.get_node(code) or regions.get_node("CN")
@@ -2099,7 +3237,7 @@ def spa_fallback(full_path: str) -> Response:
     return _index_html()
 ```
 
-### `app/static/index.html`（833 行）
+### `app/static/index.html`（1518 行）
 
 ```html
 <!DOCTYPE html>
@@ -2156,7 +3294,7 @@ def spa_fallback(full_path: str) -> Response:
   /* ---------- 右：统计面板 ---------- */
   .side { width: 500px; border-left: 1px solid var(--border); background: var(--panel);
           overflow-y: auto; padding: 12px 14px 24px; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .tab { padding: 7px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
          border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tab.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
@@ -2214,6 +3352,42 @@ def spa_fallback(full_path: str) -> Response:
   .export-msg { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 2px 2px 0; min-height: 15px; }
   .export-msg.err { color: #C0392B; }
 
+  /* ---------- 投入产出 ---------- */
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: #fbfcfd; }
+  .kpi .k { font-size: 11px; color: var(--muted); }
+  .kpi .v { font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 2px;
+            font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .kpi .v .u { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .kpi .n { font-size: 10.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+
+  /* ---------- 设置表单 ---------- */
+  .form { display: grid; gap: 7px; }
+  .form label { display: grid; grid-template-columns: 76px 1fr; align-items: center;
+                gap: 8px; font-size: 12px; color: var(--muted); }
+  .form input, .form select { height: 30px; border: 1px solid var(--border); border-radius: 7px;
+                              padding: 0 9px; font-size: 12.5px; color: var(--ink);
+                              background: #fff; width: 100%; box-sizing: border-box; }
+
+  /* ---------- 地图 ---------- */
+  .mapbox { height: 340px; border: 1px solid var(--border); border-radius: 8px;
+            overflow: hidden; background: #f4f6f8; position: relative; margin-bottom: 8px; }
+  .mapbox .ph { position: absolute; inset: 0; display: flex; align-items: center;
+                justify-content: center; text-align: center; padding: 18px;
+                font-size: 12px; color: var(--muted); line-height: 1.7; }
+  .mapinfo { position: absolute; left: 8px; bottom: 8px; background: rgba(255,255,255,.95);
+             border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px;
+             font-size: 11.5px; color: var(--ink); z-index: 5; }
+
+  /* ---------- 麦克风 ---------- */
+  .microw { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+  .microw button { height: 32px; padding: 0 12px; border-radius: 8px;
+                   border: 1px solid var(--border); background: #fff; cursor: pointer; font-size: 12.5px; }
+  .microw button:disabled { opacity: .6; cursor: default; }
+  .meter { flex: 1; height: 10px; background: #eef1f4; border-radius: 5px; overflow: hidden; }
+  .meterfill { height: 100%; width: 0%; background: var(--brand); transition: width .08s linear; }
+  .meterfill.hot { background: #e07a5f; }
+
   .yearbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
   .yearbar select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; color: var(--ink); background: #fff; }
 
@@ -2229,7 +3403,7 @@ def spa_fallback(full_path: str) -> Response:
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.5.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.6.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 消耗地图 · 语音</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -2250,6 +3424,9 @@ def spa_fallback(full_path: str) -> Response:
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
+      <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
+      <div class="tab" data-pane="map" onclick="switchTab('map')">消耗地图</div>
+      <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
 
     <!-- 区域统计 -->
@@ -2379,13 +3556,138 @@ def spa_fallback(full_path: str) -> Response:
         <button onclick="exportExcel()">导出 Excel（含企业名录）</button>
       </div>
     </section>
+
+    <!-- 投入产出 -->
+    <section class="pane" id="pane-io">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="ioYear" onchange="loadIO(this.value)"></select>
+        <span id="ioScope"></span>
+      </div>
+      <div class="kpis" id="ioKpis"></div>
+      <div class="notice" id="ioNotice"></div>
+      <div class="sect-title">
+        <span>分省消耗金额（亿元）</span>
+        <span class="hintline" id="ioBasis"></span>
+      </div>
+      <div class="scroll" style="max-height: 240px">
+        <table id="ioProvTable">
+          <thead>
+            <tr>
+              <th class="num">#</th><th>省份</th>
+              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>口径</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="ioCityWrap" style="display: none">
+        <div class="sect-title">
+          <span>省内城市分摊</span>
+          <span class="hintline">地级市无投入产出表，按企业分布分摊</span>
+        </div>
+        <div class="scroll" style="max-height: 180px">
+          <table id="ioCityTable">
+            <thead><tr><th>城市</th><th class="num">企业量(万吨)</th><th class="num">金额(亿元)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="sect-title">
+        <span>企业采购金额</span>
+        <span class="hintline" id="ioEntHint">年经手量 × 均价</span>
+      </div>
+      <div class="scroll" style="max-height: 220px">
+        <table id="ioEntTable">
+          <thead>
+            <tr><th>企业</th><th>省 / 市</th><th class="num">年经手量</th><th class="num">金额(亿元)</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button onclick="loadIO(state.year)">刷新</button>
+        <button onclick="exportExcel()">导出 Excel</button>
+      </div>
+    </section>
+
+    <!-- 消耗地图 -->
+    <section class="pane" id="pane-map">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="mapYear" onchange="loadMap(this.value)"></select>
+        <span id="mapScope"></span>
+      </div>
+      <div class="notice" id="mapNotice"></div>
+      <div class="mapbox" id="mapBox">
+        <div class="ph" id="mapPlaceholder">地图未加载</div>
+      </div>
+      <div class="sect-title">
+        <span>省份消耗金额排行</span>
+        <span class="hintline">无地图密钥时以此为准</span>
+      </div>
+      <div class="chart" id="mapRank"></div>
+      <div class="actions">
+        <button onclick="loadMap(state.year)">重新加载</button>
+        <button onclick="switchTab('settings')">配置地图密钥</button>
+      </div>
+    </section>
+
+    <!-- 设置：模型配置 + 麦克风自检 -->
+    <section class="pane" id="pane-settings">
+      <div class="sect-title">
+        <span>模型配置（接入 API 思考）</span>
+        <span class="hintline" id="llmState"></span>
+      </div>
+      <div class="notice" id="llmNotice"></div>
+      <div class="form">
+        <label>预设<select id="llmPreset" onchange="applyPreset(this.value)"></select></label>
+        <label>Base URL<input id="llmBase" placeholder="https://api.deepseek.com/v1" /></label>
+        <label>模型名<input id="llmModel" placeholder="deepseek-chat" /></label>
+        <label>API Key<input id="llmKey" type="password" placeholder="留空则沿用已保存的密钥" /></label>
+        <label>温度<input id="llmTemp" type="number" step="0.1" min="0" max="2" value="0.3" /></label>
+        <label>最大 tokens<input id="llmTokens" type="number" min="50" max="4000" value="600" /></label>
+        <label>地图 Key<input id="mapKey" type="password" placeholder="腾讯位置服务 key（仅存本机浏览器）" /></label>
+      </div>
+      <div class="actions">
+        <button onclick="saveLLM()">保存配置</button>
+        <button onclick="testLLM()">测试连接</button>
+      </div>
+      <div class="export-msg" id="llmMsg"></div>
+
+      <div class="sect-title">
+        <span>麦克风自检</span>
+        <span class="hintline" id="micEnv"></span>
+      </div>
+      <div class="notice" id="micNotice"></div>
+      <div class="microw">
+        <button id="micCheckBtn" onclick="micCheck()">检测收音（3 秒）</button>
+        <div class="meter"><div class="meterfill" id="micMeter"></div></div>
+        <span id="micPeak" style="font-size:11.5px;color:var(--muted);width:52px;text-align:right">—</span>
+      </div>
+      <div class="scroll" style="max-height: 132px">
+        <table id="micDevices">
+          <thead><tr><th>输入设备</th><th>状态</th></tr></thead>
+          <tbody><tr><td colspan="2" class="empty">点上面的按钮授权后列出设备</td></tr></tbody>
+        </table>
+      </div>
+      <div class="export-msg" id="micMsg"></div>
+      <div class="sect-title">
+        <span>语音识别实测</span>
+        <span class="hintline">说一句话，看输入框是否出字</span>
+      </div>
+      <div class="actions">
+        <button onclick="micRecognize()">开始识别</button>
+      </div>
+      <div class="export-msg" id="micResult"></div>
+    </section>
   </aside>
 </div>
 
 <script>
   const SUGGESTIONS = [
     "纸箱能回收吗", "办公用纸 3kg", "山东省回收量",
-    "全国统计", "历年数据", "分类回收数据"
+    "全国统计", "历年数据", "分类回收数据", "废纸消耗金额"
   ];
   const messagesEl = document.getElementById("messages");
   const chipsEl = document.getElementById("chips");
@@ -2418,12 +3720,21 @@ def spa_fallback(full_path: str) -> Response:
     inputEl.value = "";
     sendBtn.disabled = true;
     try {
-      const res = await fetch("/chat", {
+      // 走 /api/llm/chat：配置了大模型就用大模型，没配置自动回落规则引擎
+      const res = await fetch("/api/llm/chat", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({ message: text })
       });
       const data = await res.json();
       addMsg(data.reply, "bot");
+      if (data.engine === "llm") {
+        const tag = document.createElement("div");
+        tag.className = "msg bot";
+        tag.style.cssText = "font-size:10.5px;color:var(--muted);padding:0 2px 6px";
+        tag.textContent = `（由 ${data.model || "大模型"} 生成，${data.latency_ms} ms）`;
+        messagesEl.appendChild(tag);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
     } catch (e) {
       addMsg("服务暂时不可用：" + e, "bot");
     } finally {
@@ -2440,6 +3751,9 @@ def spa_fallback(full_path: str) -> Response:
       p.classList.toggle("active", p.id === "pane-" + name);
     });
     if (name === "enterprise") loadEnterprises();
+    if (name === "io") loadIO(state.year);
+    if (name === "map") loadMap(state.year);
+    if (name === "settings") loadSettings();
   }
 
   /* ---------------- 区域 ---------------- */
@@ -2785,7 +4099,7 @@ def spa_fallback(full_path: str) -> Response:
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(obj), 4000);
-      say(`已导出 ${name}（6 张工作表）`);
+      say(`已导出 ${name}（7 张工作表）`);
       restore("已导出 ✓");
       setTimeout(() => restore(label || "导出 Excel"), 1600);
     } catch (e) {
@@ -2798,6 +4112,515 @@ def spa_fallback(full_path: str) -> Response:
       }
       restore("导出失败");
       setTimeout(() => restore(label || "导出 Excel"), 2400);
+    }
+  }
+
+  /* ================= 投入产出（消耗金额） ================= */
+  function fmtNum(n, d) {
+    if (n === null || n === undefined || n === "") return "—";
+    const v = Number(n);
+    if (!isFinite(v)) return "—";
+    return v.toLocaleString("zh-CN", {
+      minimumFractionDigits: d || 0, maximumFractionDigits: d || 0
+    });
+  }
+
+  function kpiCard(k, v, u, note) {
+    return `<div class="kpi"><div class="k">${k}</div>
+      <div class="v">${v}<span class="u">${u}</span></div>
+      <div class="n">${note || ""}</div></div>`;
+  }
+
+  function fillYearSelect(id, years, current) {
+    const sel = document.getElementById(id);
+    if (!sel || !years || !years.length) return;
+    const sig = years.join(",");
+    if (sel.dataset.filled !== sig) {
+      sel.innerHTML = years.slice().sort((a, b) => b - a)
+        .map(y => `<option value="${y}">${y}</option>`).join("");
+      sel.dataset.filled = sig;
+    }
+    sel.value = current;
+  }
+
+  async function loadIO(year) {
+    const y = Number(year) || state.year;
+    const q = state.code && state.code !== "CN"
+      ? `&code=${encodeURIComponent(state.code)}` : "";
+    let d;
+    try {
+      d = await (await fetch(`/api/io?year=${y}${q}`)).json();
+    } catch (e) {
+      document.getElementById("ioNotice").textContent = "接口不可用：" + e;
+      return;
+    }
+
+    fillYearSelect("ioYear", d.years, d.spend.year);
+    document.getElementById("ioScope").textContent =
+      d.scope && d.scope !== "全国" ? `· ${d.scope}` : "";
+
+    const s = d.spend, dc = d.direct_coefficient, uc = d.unit_consumption;
+    document.getElementById("ioKpis").innerHTML = [
+      kpiCard("废纸消耗金额", fmtNum(s.amount, 1), "亿元",
+        `${s.provenance}；按回收参考价计，属纸厂成本下限`),
+      kpiCard("直接消耗系数",
+        dc.coefficient === null || dc.coefficient === undefined ? "—" : fmtNum(dc.coefficient_pct, 2),
+        "%",
+        dc.coefficient === null
+          ? "该年造纸业营收无公开值"
+          : `货值 ${fmtNum(dc.spend, 1)} 亿 ÷ 营收 ${fmtNum(dc.revenue, 0)} 亿`),
+      kpiCard("单位产值消耗",
+        uc.value === null || uc.value === undefined ? "—" : fmtNum(uc.value, 3),
+        "吨/万元", "消耗量 ÷ 营业收入"),
+      kpiCard("加权参考价", fmtNum(s.avg_price, 0), "元/吨",
+        "分类结构加权，居民 / 回收站口径")
+    ].join("");
+
+    document.getElementById("ioNotice").innerHTML =
+      `<b>口径分级</b>：` +
+      d.levels.map(l =>
+        `${l.name}（${l.io_available ? "有官方表" : "无官方表"}，${l.provenance}）`
+      ).join("　") +
+      `。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
+      `这两级的金额都是分摊估算，不能当作统计公报数据引用。`;
+
+    document.getElementById("ioBasis").textContent = d.provinces.basis;
+    document.querySelector("#ioProvTable tbody").innerHTML =
+      d.provinces.rows.map(r => `
+        <tr class="row" onclick="loadStats('${r.code}', ${d.spend.year})">
+          <td class="num">${r.rank}</td>
+          <td>${r.name}</td>
+          <td class="num">${r.share_pct}</td>
+          <td class="num">${fmtNum(r.amount, 1)}</td>
+          <td>${r.provenance}</td>
+        </tr>`).join("");
+
+    // 省内城市分摊（仅选中省份时有）
+    const cityWrap = document.getElementById("ioCityWrap");
+    if (d.cities && d.cities.cities && d.cities.cities.length) {
+      cityWrap.style.display = "block";
+      document.querySelector("#ioCityTable tbody").innerHTML =
+        d.cities.cities.map(c => `
+          <tr><td>${c.city}</td>
+              <td class="num">${fmtNum(c.enterprise_volume, 1)}</td>
+              <td class="num">${fmtNum(c.amount, 2)}</td></tr>`).join("");
+    } else {
+      cityWrap.style.display = "none";
+    }
+
+    const ent = d.enterprises;
+    document.getElementById("ioEntHint").textContent =
+      `${ent.rows.length} 家 · 均价 ${fmtNum(ent.avg_price, 0)} 元/吨 · ${ent.provenance}`;
+    document.querySelector("#ioEntTable tbody").innerHTML =
+      ent.rows.slice(0, 40).map(e => `
+        <tr><td>${e.name}</td>
+            <td>${e.province} / ${e.city}</td>
+            <td class="num">${fmtNum(e.volume, 1)}</td>
+            <td class="num">${fmtNum(e.amount, 2)}</td></tr>`).join("");
+  }
+
+  /* ================= 消耗地图 ================= */
+  // 合规：底图只用腾讯位置服务（正版底图、有审图号），且不内置任何可用密钥。
+  // 没有 key 时降级为排行视图，绝不自行绘制国界。
+  let TMAP_KEY_LOCAL = "";
+
+  function loadScriptOnce(src, id) {
+    return new Promise((resolve, reject) => {
+      const old = document.getElementById(id);
+      if (old) { resolve(); return; }
+      const s = document.createElement("script");
+      s.id = id;
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("SDK 加载失败"));
+      document.head.appendChild(s);
+    });
+  }
+
+  function bubbleIcon(size, hot) {
+    const fill = hot ? "#C0392B" : "#2F7D4F";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">`
+      + `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1.5}" `
+      + `fill="${fill}" fill-opacity="0.72" stroke="${fill}" stroke-width="1.2"/></svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function renderMapRank(points, unit) {
+    const top = points.slice(0, 12);
+    const max = Math.max.apply(null, points.map(p => p.amount).concat([1]));
+    document.getElementById("mapRank").innerHTML = top.map(p => `
+      <div class="rowc" style="grid-template-columns:74px 1fr 64px">
+        <span class="lbl">${p.name}</span>
+        <div class="track"><div class="fill" style="width:${(p.amount / max * 100).toFixed(1)}%"></div></div>
+        <span class="val">${fmtNum(p.amount, 1)}</span>
+      </div>`).join("") +
+      `<div style="font-size:10.5px;color:var(--muted);margin-top:6px">
+        单位：${unit}；按回收参考价计价，属纸厂废纸成本下限
+      </div>`;
+  }
+
+  async function loadMap(year) {
+    const y = Number(year) || state.year;
+    const notice = document.getElementById("mapNotice");
+    const box = document.getElementById("mapBox");
+    let cfg, data;
+    try {
+      cfg = await (await fetch("/api/map/config")).json();
+      data = await (await fetch(`/api/map/data?year=${y}`)).json();
+    } catch (e) {
+      notice.textContent = "接口不可用：" + e;
+      return;
+    }
+
+    fillYearSelect("mapYear", [y], y);
+    document.getElementById("mapScope").textContent = `· ${y} 年`;
+    renderMapRank(data.points, data.unit);
+
+    const saved = (localStorage.getItem("tmapKey") || TMAP_KEY_LOCAL || "").trim();
+    const key = saved || (cfg.key || "").trim();
+    if (saved) {
+      const ki = document.getElementById("mapKey");
+      if (ki) ki.placeholder = "已保存在本机浏览器（留空即沿用）";
+    }
+
+    if (!key) {
+      box.innerHTML = `<div class="ph">未配置地图密钥，已降级为下方的省份排行。<br>
+        地图底图需使用腾讯位置服务（正版底图，带审图号）。<br>
+        请到 <a href="${cfg.apply_url}" target="_blank" rel="noopener">腾讯位置服务控制台</a>
+        申请免费 key，再到「设置 → 地图 Key」填入。</div>`;
+      notice.innerHTML = cfg.attribution + " " + cfg.fallback;
+      return;
+    }
+
+    box.innerHTML = `<div class="ph">地图加载中…</div>`;
+    try {
+      if (!window.TMap) {
+        await loadScriptOnce(cfg.sdk_url + "&key=" + encodeURIComponent(key), "tmap-sdk");
+      }
+      drawBubbles(box, data);
+      notice.innerHTML = cfg.attribution;
+    } catch (e) {
+      box.innerHTML = `<div class="ph">地图 SDK 加载失败：${String(e.message || e)}<br>
+        常见原因：key 未开通 Web 端 / Referer 白名单不含当前地址 / 网络不可达。<br>
+        已降级为下方排行视图。</div>`;
+      notice.innerHTML = cfg.attribution + " " + cfg.fallback;
+    }
+  }
+
+  function drawBubbles(box, data) {
+    box.innerHTML = "";
+    const canvas = document.createElement("div");
+    canvas.style.cssText = "width:100%;height:100%";
+    box.appendChild(canvas);
+    const info = document.createElement("div");
+    info.className = "mapinfo";
+    info.id = "mapInfo";
+    info.textContent = "点气泡查看省份金额";
+    box.appendChild(info);
+
+    const map = new TMap.Map(canvas, {
+      center: new TMap.LatLng(35.2, 105.5),
+      zoom: 4,
+      viewMode: "2D"
+    });
+
+    const LEVELS = 5;
+    const styles = {};
+    for (let i = 1; i <= LEVELS; i++) {
+      const size = 16 + i * 7;
+      styles["s" + i] = new TMap.MarkerStyle({
+        width: size, height: size,
+        anchor: { x: size / 2, y: size / 2 },
+        src: bubbleIcon(size, i >= 4)
+      });
+    }
+
+    const geometries = data.points.map(p => {
+      const lv = Math.max(1, Math.min(LEVELS, Math.ceil((p.ratio || 0) * LEVELS)));
+      return {
+        id: p.code,
+        styleId: "s" + lv,
+        position: new TMap.LatLng(p.lat, p.lon),
+        properties: { name: p.name, amount: p.amount, rank: p.rank }
+      };
+    });
+
+    const layer = new TMap.MultiMarker({ map: map, styles: styles, geometries: geometries });
+    layer.on("click", evt => {
+      const p = (evt.geometry && evt.geometry.properties) || {};
+      const el = document.getElementById("mapInfo");
+      if (el) {
+        el.textContent = `${p.name}：${fmtNum(p.amount, 1)} ${data.unit}（全国第 ${p.rank} 位）`;
+      }
+    });
+    window.__tmap = map;
+  }
+
+  /* ================= 设置：模型配置 ================= */
+  let LLM_PRESETS = [];
+
+  async function loadSettings() {
+    micEnv();
+    try {
+      const s = await (await fetch("/api/llm/config")).json();
+      LLM_PRESETS = s.presets || [];
+      const c = s.config;
+      const sel = document.getElementById("llmPreset");
+      sel.innerHTML = '<option value="">自定义</option>' + LLM_PRESETS
+        .map(p => `<option value="${p.base_url}">${p.name}</option>`).join("");
+      document.getElementById("llmBase").value = c.base_url || "";
+      document.getElementById("llmModel").value = c.model || "";
+      document.getElementById("llmTemp").value = c.temperature;
+      document.getElementById("llmTokens").value = c.max_tokens;
+      document.getElementById("llmKey").placeholder = c.has_api_key
+        ? `已保存 ${c.api_key_masked}（留空沿用）` : "尚未配置密钥";
+      document.getElementById("llmState").textContent = c.configured
+        ? `已配置 · ${c.model} · 来源 ${c.source}` : "未配置（对话走规则引擎）";
+      document.getElementById("llmNotice").innerHTML = c.configured
+        ? "配置保存在服务端 <code>config/llm.json</code>（已加入 .gitignore），接口只返回脱敏密钥。"
+        : "没配置也能用：对话会自动回落到内置规则引擎。要接入大模型，填 Base URL、模型名与 API Key 后保存。";
+      if (localStorage.getItem("tmapKey")) {
+        document.getElementById("mapKey").placeholder = "已保存在本机浏览器（留空即沿用）";
+      }
+    } catch (e) {
+      document.getElementById("llmNotice").textContent = "读取配置失败：" + e;
+    }
+  }
+
+  function applyPreset(url) {
+    if (!url) return;
+    document.getElementById("llmBase").value = url;
+    const hit = LLM_PRESETS.filter(p => p.base_url === url)[0];
+    if (hit) document.getElementById("llmModel").value = hit.model;
+  }
+
+  async function saveLLM() {
+    const msg = document.getElementById("llmMsg");
+    msg.classList.remove("err");
+    const mapKey = document.getElementById("mapKey").value.trim();
+    if (mapKey) {
+      localStorage.setItem("tmapKey", mapKey);
+      TMAP_KEY_LOCAL = mapKey;
+    }
+    msg.textContent = "保存中…";
+    try {
+      const res = await fetch("/api/llm/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_url: document.getElementById("llmBase").value.trim(),
+          api_key: document.getElementById("llmKey").value.trim() || null,
+          model: document.getElementById("llmModel").value.trim(),
+          temperature: Number(document.getElementById("llmTemp").value || 0.3),
+          max_tokens: Number(document.getElementById("llmTokens").value || 600)
+        })
+      });
+      const d = await res.json();
+      document.getElementById("llmKey").value = "";
+      msg.textContent = "已保存：" + d.config.model
+        + (mapKey ? "；地图 key 已存本机浏览器" : "");
+      await loadSettings();
+    } catch (e) {
+      msg.textContent = "保存失败：" + e;
+      msg.classList.add("err");
+    }
+  }
+
+  async function testLLM() {
+    const msg = document.getElementById("llmMsg");
+    msg.classList.remove("err");
+    msg.textContent = "测试中…";
+    try {
+      const d = await (await fetch("/api/llm/test", { method: "POST" })).json();
+      if (d.ok) {
+        msg.textContent = `连通正常：${d.model}，${d.latency_ms} ms，返回「${d.reply}」`;
+      } else {
+        msg.textContent = "失败：" + d.error;
+        msg.classList.add("err");
+      }
+    } catch (e) {
+      msg.textContent = "请求失败：" + e;
+      msg.classList.add("err");
+    }
+  }
+
+  /* ================= 麦克风自检 =================
+     只判断「有没有权限」是不够的：权限给了也可能没声音。
+     这里真的读音频流算 RMS，3 秒内看峰值，才能回答「能不能收音」。
+  */
+  let micStream = null;
+  let micCtx = null;
+  let micRAF = 0;
+
+  function micEnv() {
+    const el = document.getElementById("micEnv");
+    if (!el) return;
+    const secure = window.isSecureContext;
+    const gum = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    el.textContent = `安全上下文 ${secure ? "✓" : "✗"} · 录音 ${gum ? "✓" : "✗"} · 识别 ${SR ? "✓" : "✗"}`;
+  }
+
+  async function listMics() {
+    const tb = document.querySelector("#micDevices tbody");
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === "audioinput");
+      if (!mics.length) {
+        tb.innerHTML = '<tr><td colspan="2" class="empty">没有检测到音频输入设备</td></tr>';
+        return;
+      }
+      tb.innerHTML = mics.map((d, i) =>
+        `<tr><td>${d.label || ("麦克风 " + (i + 1) + "（未授权时无名称）")}</td>
+             <td>${d.deviceId === "default" ? "系统默认" : "可用"}</td></tr>`).join("");
+    } catch (e) {
+      tb.innerHTML = `<tr><td colspan="2" class="empty">读取设备失败：${e}</td></tr>`;
+    }
+  }
+
+  async function micCheck() {
+    const btn = document.getElementById("micCheckBtn");
+    const msg = document.getElementById("micMsg");
+    const meter = document.getElementById("micMeter");
+    const peakEl = document.getElementById("micPeak");
+    msg.classList.remove("err");
+
+    if (!window.isSecureContext) {
+      msg.textContent = "当前页面不是 HTTPS / localhost，浏览器会直接拒绝录音。请用 http://localhost:8000 打开。";
+      msg.classList.add("err");
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      msg.textContent = "当前浏览器不支持 getUserMedia，无法检测麦克风。";
+      msg.classList.add("err");
+      return;
+    }
+
+    btn.disabled = true;
+    msg.textContent = "正在申请麦克风权限…";
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      btn.disabled = false;
+      const map = {
+        NotAllowedError: "权限被拒绝：点地址栏左侧的锁 / 麦克风图标 → 允许麦克风，再刷新页面。",
+        NotFoundError: "没有找到麦克风设备。",
+        NotReadableError: "麦克风被其他程序占用（会议软件、录屏工具等），关掉后再试。",
+        OverconstrainedError: "麦克风不支持当前参数。",
+        SecurityError: "安全策略禁止访问麦克风。"
+      };
+      msg.textContent = map[err.name] || ("录音失败：" + err.name + " " + err.message);
+      msg.classList.add("err");
+      return;
+    }
+
+    await listMics();
+
+    micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = micCtx.createMediaStreamSource(micStream);
+    const analyser = micCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    src.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+
+    let peak = 0;
+    const started = Date.now();
+    msg.textContent = "正在检测，请对着麦克风说句话…";
+
+    const finish = () => {
+      cancelAnimationFrame(micRAF);
+      btn.disabled = false;
+      meter.style.width = "0%";
+      if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+      if (micCtx) {
+        micCtx.close();
+        micCtx = null;
+      }
+      const pct = (peak * 100).toFixed(0);
+      if (peak < 0.01) {
+        msg.textContent = `3 秒内几乎没收到声音（峰值 ${pct}%）。检查：系统输入设备是否选对、`
+          + `麦克风是否静音、有没有硬件静音开关。`;
+        msg.classList.add("err");
+      } else if (peak < 0.05) {
+        msg.textContent = `有声音但很弱（峰值 ${pct}%）。把麦克风靠近一点，或在系统里调高输入音量。`;
+      } else {
+        msg.textContent = `收音正常（峰值 ${pct}%）。可以试下面的语音识别。`;
+      }
+    };
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > peak) peak = rms;
+      meter.style.width = Math.min(100, rms * 400).toFixed(0) + "%";
+      meter.classList.toggle("hot", rms > 0.25);
+      peakEl.textContent = (peak * 100).toFixed(0) + "%";
+      if (Date.now() - started < 3000) {
+        micRAF = requestAnimationFrame(tick);
+      } else {
+        finish();
+      }
+    };
+    tick();
+  }
+
+  async function micRecognize() {
+    const out = document.getElementById("micResult");
+    out.classList.remove("err");
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      out.textContent = "当前浏览器不支持语音识别（Chrome / Edge 可用）。";
+      out.classList.add("err");
+      return;
+    }
+    out.textContent = "正在听… 请说一句话";
+    const r = new SR();
+    r.lang = "zh-CN";
+    r.interimResults = true;
+    r.continuous = false;
+    let finalText = "";
+
+    r.onresult = ev => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t; else interim += t;
+      }
+      out.textContent = "识别中：" + (finalText + interim);
+    };
+    r.onerror = ev => {
+      const map = {
+        "not-allowed": "麦克风权限被拒绝。",
+        "service-not-allowed": "浏览器禁用了语音识别服务。",
+        "audio-capture": "没有检测到麦克风。",
+        network: "识别服务连不上（Chrome 需要联网）。",
+        "no-speech": "没有听到声音。",
+        "language-not-supported": "不支持中文识别。"
+      };
+      out.textContent = map[ev.error] || ("识别失败：" + ev.error);
+      out.classList.add("err");
+    };
+    r.onend = () => {
+      if (finalText.trim()) {
+        out.textContent = `识别成功：「${finalText.trim()}」已填入输入框`;
+        inputEl.value = finalText.trim();
+      } else if (!out.classList.contains("err")) {
+        out.textContent = "没有识别到文字。可能是环境太吵，或识别服务连不上。";
+        out.classList.add("err");
+      }
+    };
+    try {
+      r.start();
+    } catch (e) {
+      out.textContent = "启动失败：" + e.message;
+      out.classList.add("err");
     }
   }
 
@@ -3387,7 +5210,7 @@ def test_province_volume_not_exceed_official():
         assert float(row["volume"]) <= official, f"{node['name']} 企业量超过官方回收量"
 ```
 
-### `tests/test_exporter.py`（101 行）
+### `tests/test_exporter.py`（102 行）
 
 ```python
 import io
@@ -3411,7 +5234,8 @@ def _load(code="CN", year=2024):
 def test_sheets_present():
     wb = _load()
     assert wb.sheetnames == [
-        "省级统计", "分类回收", "历年回收", "废纸进口", "企业名录", "数据说明"
+        "省级统计", "分类回收", "历年回收", "废纸进口",
+        "企业名录", "投入产出", "数据说明"
     ]
 
 
@@ -3491,6 +5315,437 @@ def test_filename():
 def test_export_unknown_code_falls_back_to_national():
     wb = _load("NOT_A_CODE")
     assert wb["省级统计"].max_row == 3 + 34 + 1
+```
+
+### `tests/test_io_table.py`（224 行）
+
+```python
+"""投入产出模型测试。
+
+重点不是「函数能跑」，而是：
+1. 金额与已有分类数据自洽（不能凭空多出或少掉钱）；
+2. 四级口径的标签不能串（官方 / 测算 / 估算 / 示例）；
+3. Leontief 逆矩阵算得对（拿教科书例子对答案）；
+4. 没有官方数据的层级必须显式说明「没有」，而不是返回一个像真的数字。
+"""
+
+import math
+
+import pytest
+
+from paper_recycle_agent import io_table
+from paper_recycle_agent import stats as stats_mod
+
+
+# ---------------------------------------------------------------- 金额口径
+
+
+def test_spend_matches_category_sum():
+    """全国金额必须等于分类拆分金额之和。"""
+    s = io_table.spend(2024)
+    rows = stats_mod.category_breakdown(2024, total=s["tonnage"])
+    assert abs(sum(r["value"] for r in rows) - s["amount"]) < 0.2
+
+
+def test_spend_is_labelled_lower_bound():
+    """金额按回收参考价计，必须标为下限，避免被当成到厂采购额。"""
+    s = io_table.spend(2024)
+    assert s["is_lower_bound"] is True
+    assert "下限" in s["note"]
+
+
+def test_tonnage_prefers_consumption():
+    amount, basis = io_table.tonnage(2024)
+    assert amount == 7030.0
+    assert "消费量" in basis
+
+
+def test_tonnage_falls_back_to_recovery():
+    """2016 年消费量未公布，应退回回收量并说明。"""
+    amount, basis = io_table.tonnage(2016)
+    assert amount == 4964.0
+    assert "回收量" in basis
+
+
+def test_average_price_reasonable():
+    price = io_table.average_price(2024)
+    # 回收参考价（居民/回收站口径）应在 500—2000 元/吨之间
+    assert 500 < price < 2000
+
+
+def test_direct_coefficient_matches_formula():
+    d = io_table.direct_coefficient(2024)
+    expected = round(io_table.spend(2024)["amount"] / 14600.0, 4)
+    assert d["coefficient"] == expected
+    assert d["is_lower_bound"] is True
+
+
+def test_direct_coefficient_none_without_revenue():
+    """没有营收公开值的年份，系数必须是 None，而不是编一个。"""
+    d = io_table.direct_coefficient(2020)
+    assert d["coefficient"] is None
+    assert "无公开" in d["note"]
+
+
+def test_unit_consumption_dimension():
+    u = io_table.unit_consumption(2024)
+    assert u["value"] == round(7030.0 / 14600.0, 3)
+
+
+# ---------------------------------------------------------------- 分省
+
+
+def test_province_rows_complete_and_sorted():
+    data = io_table.province_spend(2024)
+    rows = data["rows"]
+    assert len(rows) == 34
+    amounts = [r["amount"] for r in rows]
+    assert amounts == sorted(amounts, reverse=True)
+    assert rows[0]["rank"] == 1
+
+
+def test_province_amount_sums_to_national():
+    data = io_table.province_spend(2024)
+    total = sum(float(r["amount"]) for r in data["rows"])
+    assert abs(total - data["total"]) < 1.0  # 逐行四舍五入的累计误差
+
+
+def test_province_provenance_reflects_quality():
+    """山东是公开报道值，不能被标成「估算」。"""
+    rows = {r["name"]: r for r in io_table.province_spend(2024)["rows"]}
+    assert rows["山东省"]["provenance"] == io_table.PROVENANCE_OFFICIAL
+    assert rows["山西省"]["provenance"] == io_table.PROVENANCE_ESTIMATED
+
+
+def test_province_basis_says_not_actual_purchase():
+    basis = io_table.province_spend(2024)["basis"]
+    assert "非实际采购分布" in basis
+
+
+# ---------------------------------------------------------------- 城市 / 企业
+
+
+def test_city_spend_sums_to_province():
+    data = io_table.city_spend("370000", 2024)
+    total = sum(float(c["amount"]) for c in data["cities"])
+    assert abs(total - data["province_amount"]) < 0.5
+
+
+def test_city_requires_province_code():
+    data = io_table.city_spend("CN", 2024)
+    assert data["cities"] == []
+    assert data["provenance"] == "无数据"
+
+
+def test_city_note_mentions_no_official_table():
+    data = io_table.city_spend("370000", 2024)
+    assert "不编制投入产出表" in data["note"]
+
+
+def test_enterprise_amount_formula():
+    price = io_table.average_price(2024)
+    data = io_table.enterprise_spend(2024)
+    for row in data["rows"][:5]:
+        assert abs(row["amount"] - row["volume"] * price / 10000) < 0.02
+
+
+def test_enterprise_flagged_as_demo():
+    data = io_table.enterprise_spend(2024)
+    assert data["provenance"] == io_table.PROVENANCE_DEMO
+    assert "不存在投入产出表" in data["note"]
+
+
+# ---------------------------------------------------------------- 口径分级
+
+
+def test_levels_declare_io_availability():
+    levels = {lv["key"]: lv for lv in io_table.LEVELS}
+    assert levels["national"]["io_available"] is True
+    assert levels["province"]["io_available"] is True
+    # 国家统计局明确：地级市不编制投入产出表
+    assert levels["city"]["io_available"] is False
+    assert levels["enterprise"]["io_available"] is False
+
+
+def test_overview_has_all_parts():
+    d = io_table.overview(2024)
+    for key in ("national_io", "levels", "sources", "spend",
+                "direct_coefficient", "unit_consumption", "provinces",
+                "enterprises", "years"):
+        assert key in d
+
+
+def test_summary_text_mentions_provenance():
+    text = io_table.summary_text(2024)
+    assert "消耗金额" in text
+    assert "口径分级" in text
+    assert "地级市" in text
+
+
+def test_summary_text_coefficient_carries_percent_unit():
+    """直接消耗系数必须带 % —— 之前漏了单位，读起来像「4.28 元」。"""
+    text = io_table.summary_text(2024)
+    pct = io_table.direct_coefficient(2024)["coefficient_pct"]
+    assert ("%s%%" % pct) in text
+    assert "属下限" in text
+
+
+# ---------------------------------------------------------------- Leontief
+
+
+def test_leontief_inverse_textbook_example():
+    """A=[[0.2,0.3],[0.4,0.1]] → (I-A)^-1=[[1.5,0.5],[2/3,4/3]]"""
+    inv = io_table.leontief_inverse([[0.2, 0.3], [0.4, 0.1]])
+    expected = [[1.5, 0.5], [2.0 / 3.0, 4.0 / 3.0]]
+    for i in range(2):
+        for j in range(2):
+            assert abs(inv[i][j] - expected[i][j]) < 1e-9
+
+
+def test_leontief_inverse_identity_for_zero_matrix():
+    inv = io_table.leontief_inverse([[0.0, 0.0], [0.0, 0.0]])
+    assert inv == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_leontief_inverse_rejects_singular():
+    with pytest.raises(ValueError):
+        io_table.leontief_inverse([[1.0, 0.0], [0.0, 1.0]])
+
+
+def test_leontief_inverse_rejects_non_square():
+    with pytest.raises(ValueError):
+        io_table.leontief_inverse([[0.1, 0.2]])
+
+
+def test_influence_and_response_mean_to_one():
+    """影响力 / 感应度系数的平均值恒为 1，这是定义决定的。"""
+    A = [[0.1, 0.2, 0.1], [0.2, 0.1, 0.2], [0.1, 0.1, 0.1]]
+    inf = io_table.influence_coefficients(A)
+    res = io_table.response_coefficients(A)
+    assert math.isclose(sum(inf) / len(inf), 1.0, rel_tol=1e-3)
+    assert math.isclose(sum(res) / len(res), 1.0, rel_tol=1e-3)
+
+
+def test_load_matrix_csv_roundtrip(tmp_path):
+    p = tmp_path / "m.csv"
+    p.write_text("部门,A,B\nA,0.1,0.2\nB,0.3,0.4\n", encoding="utf-8")
+    names, matrix = io_table.load_matrix_csv(str(p))
+    assert names == ["A", "B"]
+    assert matrix == [[0.1, 0.2], [0.3, 0.4]]
+
+
+def test_load_matrix_csv_rejects_non_square(tmp_path):
+    p = tmp_path / "bad.csv"
+    p.write_text("部门,A,B\nA,0.1,0.2\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        io_table.load_matrix_csv(str(p))
+
+
+def test_no_builtin_matrix_shipped():
+    """仓库不内置投入产出矩阵：编一张假矩阵比不提供更糟。"""
+    assert not io_table.matrix_path().exists()
+```
+
+### `tests/test_llm.py`（197 行）
+
+```python
+"""模型配置模块测试。
+
+这里最要紧的一条是：**密钥绝不能出现在任何输出里**。
+其余是配置读写、回落行为与错误提示的可读性。
+"""
+
+import json
+import urllib.error
+
+import pytest
+
+from paper_recycle_agent import llm
+
+SECRET = "sk-test-1234567890abcdefXYZ"
+
+
+@pytest.fixture(autouse=True)
+def isolate_config(tmp_path, monkeypatch):
+    """把配置文件重定向到临时目录，避免污染真实 config/llm.json。"""
+    monkeypatch.setattr(llm, "CONFIG_PATH", tmp_path / "config" / "llm.json")
+    for name in (llm.ENV_BASE_URL, llm.ENV_API_KEY, llm.ENV_MODEL):
+        monkeypatch.delenv(name, raising=False)
+    yield
+
+
+# ---------------------------------------------------------------- 脱敏
+
+
+def test_mask_key():
+    assert llm.mask_key(SECRET) == "sk-…" + SECRET[-4:]
+    assert "1234567890" not in llm.mask_key(SECRET)
+
+
+def test_mask_key_short_and_empty():
+    assert llm.mask_key("") == ""
+    assert llm.mask_key(None) == ""
+    assert llm.mask_key("ab") == "…"
+    assert llm.mask_key("abcdef") == "…ef"
+
+
+def test_public_config_never_leaks_key():
+    cfg = llm.LLMConfig(api_key=SECRET)
+    pub = cfg.public()
+    dumped = json.dumps(pub, ensure_ascii=False)
+    assert SECRET not in dumped
+    assert pub["has_api_key"] is True
+    assert pub["api_key_masked"].endswith(SECRET[-4:])
+
+
+# ---------------------------------------------------------------- 配置读写
+
+
+def test_default_config_not_configured():
+    cfg = llm.load_config()
+    assert cfg.configured() is False
+    assert cfg.base_url == llm.DEFAULT_BASE_URL
+
+
+def test_save_and_load_roundtrip():
+    llm.save_config("https://api.deepseek.com/v1", SECRET, "deepseek-chat",
+                    temperature=0.5, max_tokens=800)
+    cfg = llm.load_config()
+    assert cfg.base_url == "https://api.deepseek.com/v1"
+    assert cfg.api_key == SECRET
+    assert cfg.model == "deepseek-chat"
+    assert cfg.temperature == 0.5
+    assert cfg.max_tokens == 800
+    assert cfg.source == "file"
+
+
+def test_save_without_key_keeps_previous_key():
+    """界面上只改模型名时，不应该把已有密钥清掉。"""
+    llm.save_config("https://api.deepseek.com/v1", SECRET, "deepseek-chat")
+    llm.save_config("https://api.deepseek.com/v1", None, "deepseek-reasoner")
+    cfg = llm.load_config()
+    assert cfg.api_key == SECRET
+    assert cfg.model == "deepseek-reasoner"
+
+
+def test_env_overrides_file():
+    llm.save_config("https://file.example/v1", "file-key", "file-model")
+    import os
+
+    os.environ[llm.ENV_BASE_URL] = "https://env.example/v1"
+    os.environ[llm.ENV_API_KEY] = "env-key"
+    try:
+        cfg = llm.load_config()
+        assert cfg.source == "env"
+        assert cfg.base_url == "https://env.example/v1"
+        assert cfg.api_key == "env-key"
+    finally:
+        os.environ.pop(llm.ENV_BASE_URL, None)
+        os.environ.pop(llm.ENV_API_KEY, None)
+
+
+def test_clear_config():
+    llm.save_config("https://x/v1", SECRET, "m")
+    assert llm.clear_config() is True
+    assert llm.clear_config() is False
+    assert llm.load_config().configured() is False
+
+
+def test_config_file_is_valid_json():
+    llm.save_config("https://x/v1", SECRET, "m")
+    raw = json.loads(llm.CONFIG_PATH.read_text(encoding="utf-8"))
+    assert raw["api_key"] == SECRET
+    assert set(raw) >= {"base_url", "api_key", "model", "temperature", "max_tokens"}
+
+
+# ---------------------------------------------------------------- endpoint
+
+
+def test_endpoint_appends_path():
+    cfg = llm.LLMConfig(base_url="https://api.deepseek.com/v1")
+    assert cfg.endpoint() == "https://api.deepseek.com/v1/chat/completions"
+
+
+def test_endpoint_tolerates_trailing_slash_and_full_path():
+    assert llm.LLMConfig(base_url="https://x/v1/").endpoint() == "https://x/v1/chat/completions"
+    assert llm.LLMConfig(
+        base_url="https://x/v1/chat/completions"
+    ).endpoint() == "https://x/v1/chat/completions"
+
+
+# ---------------------------------------------------------------- 回落与报错
+
+
+def test_chat_without_key_returns_not_configured():
+    result = llm.chat([{"role": "user", "content": "hi"}])
+    assert result["ok"] is False
+    assert result["configured"] is False
+    assert llm.ENV_API_KEY in result["error"]
+
+
+def test_probe_without_key():
+    result = llm.probe()
+    assert result["ok"] is False
+    assert result["configured"] is False
+
+
+def test_chat_http_error_is_readable_and_scrubbed(monkeypatch):
+    cfg = llm.LLMConfig(api_key=SECRET, model="m")
+
+    def boom(url, payload, key, timeout):
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(llm, "_post", boom)
+    result = llm.chat([{"role": "user", "content": "hi"}], config=cfg)
+    assert result["ok"] is False
+    assert "密钥无效" in result["error"]
+    assert SECRET not in json.dumps(result, ensure_ascii=False)
+
+
+def test_chat_network_error_is_readable(monkeypatch):
+    cfg = llm.LLMConfig(api_key=SECRET, model="m")
+
+    def boom(url, payload, key, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(llm, "_post", boom)
+    result = llm.chat([{"role": "user", "content": "hi"}], config=cfg)
+    assert result["ok"] is False
+    assert "连接失败" in result["error"]
+
+
+def test_chat_bad_payload_shape(monkeypatch):
+    cfg = llm.LLMConfig(api_key=SECRET, model="m")
+    monkeypatch.setattr(llm, "_post", lambda *a, **k: {"unexpected": True})
+    result = llm.chat([{"role": "user", "content": "hi"}], config=cfg)
+    assert result["ok"] is False
+    assert "OpenAI 兼容" in result["error"]
+
+
+def test_chat_success(monkeypatch):
+    cfg = llm.LLMConfig(api_key=SECRET, model="m")
+    monkeypatch.setattr(
+        llm, "_post",
+        lambda *a, **k: {
+            "choices": [{"message": {"content": " 可用 "}}],
+            "usage": {"total_tokens": 7},
+        },
+    )
+    result = llm.chat([{"role": "user", "content": "hi"}], config=cfg)
+    assert result["ok"] is True
+    assert result["reply"] == "可用"
+    assert result["usage"]["total_tokens"] == 7
+
+
+def test_status_shape():
+    s = llm.status()
+    assert "config" in s and "presets" in s
+    assert isinstance(s["presets"], list) and s["presets"]
+    assert s["ready"] is False
+
+
+def test_system_prompt_forbids_fabrication():
+    assert "不要编造" in llm.DEFAULT_SYSTEM_PROMPT
 ```
 
 ### `tests/test_pricing.py`（23 行）
@@ -3876,7 +6131,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.5.0"
+version = "1.6.0"
 description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
@@ -3939,6 +6194,29 @@ pytest>=7.0          # 单元测试（CI 使用）
 id,name,province_code,city,type,categories,volume,lat,lon,note
 E001,某某再生资源有限公司,370000,济南市,分拣打包中心,1;8,26.0,36.65,117.00,示例：请替换为真实企业
 E002,某某纸业原料部,440000,东莞市,造纸企业,1,55.0,23.02,113.75,示例：请替换为真实企业
+```
+
+### `data/io_matrix.csv.example`（4 行）
+
+```csv
+部门,农林牧渔,造纸和纸制品,废弃资源综合利用
+农林牧渔,0.08,0.02,0.01
+造纸和纸制品,0.01,0.35,0.02
+废弃资源综合利用,0.00,0.12,0.10
+```
+
+### `config/llm.json.example`（9 行）
+
+```csv
+{
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key": "sk-替换成你自己的密钥",
+  "model": "deepseek-chat",
+  "temperature": 0.3,
+  "max_tokens": 600,
+  "timeout": 30,
+  "system_prompt": "你是废纸回收领域的助手。涉及数据时先说明口径（官方/测算/估算/示例），不确定就说不确定；不要编造具体省份的回收量、企业采购量或价格；中文回答。"
+}
 ```
 
 ### `.github/workflows/ci.yml`（63 行）
@@ -4011,7 +6289,7 @@ jobs:
 
 ## 五、工具脚本（tools/）
 
-### `tools/build_offline.py`（672 行）
+### `tools/build_offline.py`（737 行）
 
 ```python
 """生成离线单文件版：dist/paper-recycle-offline.html
@@ -4032,7 +6310,7 @@ from pathlib import Path
 
 import paper_recycle_agent
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import enterprises, knowledge, regions
+from paper_recycle_agent import enterprises, io_table, knowledge, regions
 from paper_recycle_agent import stats as stats_mod
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -4086,6 +6364,13 @@ def build_payload() -> dict:
         "gbt": yearbook.CATEGORIES_8,
         "quality_rules": yearbook.QUALITY_RULES,
         "sources": yearbook.SOURCES + stats_mod.SOURCES,
+        "io": {
+            "spend": io_table.spend(io_table.NATIONAL_IO["year"]),
+            "direct": io_table.direct_coefficient(io_table.NATIONAL_IO["year"]),
+            "unit": io_table.unit_consumption(io_table.NATIONAL_IO["year"]),
+            "provinces": io_table.province_spend(io_table.NATIONAL_IO["year"]),
+            "levels": io_table.LEVELS,
+        },
     }
 
 
@@ -4140,6 +6425,12 @@ TEMPLATE = r"""<!DOCTYPE html>
   .sect-title{font-size:13px;font-weight:600;margin:14px 0 6px;display:flex;justify-content:space-between;gap:8px}
   .sect-title .hintline{font-size:10.5px;font-weight:400;color:var(--muted)}
   .scroll{max-height:268px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .kpi{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:#fbfcfd}
+  .kpi .k{font-size:11px;color:var(--muted)}
+  .kpi .v{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  .kpi .v .u{font-size:11px;font-weight:400;color:var(--muted);margin-left:3px}
+  .kpi .n{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45}
   table{width:100%;border-collapse:collapse;font-size:12px}
   th,td{border-bottom:1px solid var(--border);padding:5px 6px;text-align:left;white-space:nowrap}
   th{background:var(--brand-soft);color:var(--brand);font-weight:600;position:sticky;top:0;z-index:1}
@@ -4194,6 +6485,7 @@ TEMPLATE = r"""<!DOCTYPE html>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
+      <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
     </div>
 
     <section class="pane active" id="pane-region">
@@ -4256,6 +6548,22 @@ TEMPLATE = r"""<!DOCTYPE html>
         <th>企业</th><th>城市</th><th>类型</th><th class="num">年回收量(万吨)</th><th>主营</th>
         </tr></thead><tbody></tbody></table></div>
     </section>
+
+    <section class="pane" id="pane-io">
+      <div class="kpis" id="ioKpis"></div>
+      <div class="notice" id="ioNotice"></div>
+      <div class="sect-title"><span>分省消耗金额（亿元）</span>
+        <span class="hintline">按回收量占比分摊</span></div>
+      <div class="scroll" style="max-height:300px"><table id="ioTable"><thead><tr>
+        <th class="num">#</th><th>省份</th><th class="num">占比(%)</th>
+        <th class="num">金额(亿元)</th><th>口径</th>
+        </tr></thead><tbody></tbody></table></div>
+      <div class="notice" style="margin-top:8px">
+        <b>地图</b>与<b>模型配置</b>需要本地服务版：双击「启动本地版.bat」后访问
+        <code>http://localhost:8000</code>。离线版不含这两项（地图需正版底图密钥，
+        模型配置需服务端保存密钥）。
+      </div>
+    </section>
   </aside>
 </div>
 
@@ -4282,6 +6590,41 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.pane === name));
   document.querySelectorAll(".pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
   if (name === "enterprise") renderEnt();
+  if (name === "io") renderIO();
+}
+
+/* ---------- 投入产出 ---------- */
+function ioNum(n, d) {
+  if (n === null || n === undefined || n === "") return "—";
+  const v = Number(n);
+  if (!isFinite(v)) return "—";
+  return v.toLocaleString("zh-CN", {minimumFractionDigits: d || 0, maximumFractionDigits: d || 0});
+}
+
+function renderIO() {
+  const io = D.io;
+  const s = io.spend, dc = io.direct, uc = io.unit;
+  $("ioKpis").innerHTML = [
+    ["废纸消耗金额", ioNum(s.amount, 1), "亿元", s.provenance + "；按回收参考价计，属纸厂成本下限"],
+    ["直接消耗系数", dc.coefficient === null ? "—" : ioNum(dc.coefficient_pct, 2), "%",
+      dc.coefficient === null ? "该年营收无公开值" : "货值 " + ioNum(dc.spend, 1) + " 亿 ÷ 营收 " + ioNum(dc.revenue, 0) + " 亿"],
+    ["单位产值消耗", uc.value === null ? "—" : ioNum(uc.value, 3), "吨/万元", "消耗量 ÷ 营业收入"],
+    ["加权参考价", ioNum(s.avg_price, 0), "元/吨", "分类结构加权，居民 / 回收站口径"]
+  ].map(([k, v, u, n]) =>
+    '<div class="kpi"><div class="k">' + k + '</div><div class="v">' + v +
+    '<span class="u">' + u + '</span></div><div class="n">' + n + '</div></div>'
+  ).join("");
+
+  $("ioNotice").innerHTML =
+    "<b>口径分级</b>：" + io.levels.map(l =>
+      l.name + "（" + (l.io_available ? "有官方表" : "无官方表") + "，" + l.provenance + "）"
+    ).join("　") +
+    "。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——这两级的金额都是分摊估算。";
+
+  document.querySelector("#ioTable tbody").innerHTML = io.provinces.rows.map(r =>
+    '<tr><td class="num">' + r.rank + '</td><td>' + r.name + '</td><td class="num">' +
+    r.share_pct + '</td><td class="num">' + ioNum(r.amount, 1) + '</td><td>' + r.provenance + '</td></tr>'
+  ).join("");
 }
 
 /* ---------- 区域 ---------- */
@@ -4867,7 +7210,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-### `tools/gen_code_listing.py`（128 行）
+### `tools/gen_code_listing.py`（130 行）
 
 ```python
 """生成 docs/CODE_LISTING.md：把全部源码嵌入一份独立的代码清单文档。
@@ -4917,6 +7260,8 @@ ROOT_FILES = [
     "pyproject.toml",
     "requirements.txt",
     "data/enterprises.csv.example",
+    "data/io_matrix.csv.example",
+    "config/llm.json.example",
     ".github/workflows/ci.yml",
 ]
 
@@ -5002,4 +7347,4 @@ if __name__ == "__main__":
 
 ---
 
-共收录 32 个文件。
+共收录 38 个文件。
