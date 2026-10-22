@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>废纸回收 Agent 对话助手（离线版）</title>
+<style>
+  :root {
+    --bg:#f5f7fa; --panel:#fff; --ink:#1f2329; --muted:#6b7280;
+    --brand:#2f7d4f; --brand-soft:#e8f3ec; --brand-line:#cfe6da; --border:#e5e7eb;
+    --warn-bg:#fff8e6; --warn-line:#f2dfae; --warn-ink:#8a6d1f;
+    --bot:#eef1f5; --bar:#4a9d6b; --bar2:#8fbfa3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--ink);height:100vh;display:flex;flex-direction:column}
+  header{background:var(--brand);color:#fff;padding:11px 20px;font-size:17px;font-weight:600;
+         display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  header .sub{font-size:12px;font-weight:400;opacity:.9}
+  header .off{background:rgba(255,255,255,.2);border-radius:10px;padding:2px 8px;font-size:11px;font-weight:400}
+  .layout{flex:1;display:flex;min-height:0}
+  .chat{flex:1;display:flex;flex-direction:column;min-width:0}
+  .messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .msg{max-width:82%;padding:9px 13px;border-radius:13px;line-height:1.55;white-space:pre-wrap;
+       word-break:break-word;font-size:13.5px}
+  .msg.bot{background:var(--bot);align-self:flex-start;border-bottom-left-radius:4px}
+  .msg.user{background:var(--brand);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 16px 8px}
+  .chip{background:var(--brand-soft);color:var(--brand);border:1px solid var(--brand-line);
+        border-radius:15px;padding:5px 11px;font-size:12px;cursor:pointer}
+  .chip:hover{background:#dcefe2}
+  .inputbar{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:var(--panel)}
+  .inputbar input{flex:1;padding:10px 13px;border:1px solid var(--border);border-radius:9px;font-size:14px;outline:none}
+  .inputbar input:focus{border-color:var(--brand)}
+  .inputbar button{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 18px;height:38px;font-size:14px;cursor:pointer}
+  .side{width:500px;border-left:1px solid var(--border);background:var(--panel);overflow-y:auto;padding:12px 14px 24px}
+  .tabs{display:flex;gap:4px;margin-bottom:10px;border-bottom:1px solid var(--border)}
+  .tab{padding:7px 12px;font-size:13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.active{color:var(--brand);font-weight:600;border-bottom-color:var(--brand)}
+  .pane{display:none}.pane.active{display:block}
+  .summary{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#fbfcfd}
+  .sum-name{font-weight:700;font-size:15px;margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .badge{font-size:11px;font-weight:400;color:var(--brand);background:var(--brand-soft);border-radius:10px;padding:2px 8px}
+  .badge.grey{color:var(--muted);background:#f1f2f4}
+  .sum-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
+  .sum-grid div{display:flex;justify-content:space-between;font-size:12px}
+  .sum-grid span{color:var(--muted)}.sum-grid b{color:var(--ink)}
+  .prov{font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  .sect-title{font-size:13px;font-weight:600;margin:14px 0 6px;display:flex;justify-content:space-between;gap:8px}
+  .sect-title .hintline{font-size:10.5px;font-weight:400;color:var(--muted)}
+  .scroll{max-height:268px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{border-bottom:1px solid var(--border);padding:5px 6px;text-align:left;white-space:nowrap}
+  th{background:var(--brand-soft);color:var(--brand);font-weight:600;position:sticky;top:0;z-index:1}
+  tbody tr.row{cursor:pointer}tbody tr.row:hover{background:#f2f8f4}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.hi{background:#f0f8f3}
+  td.empty{color:var(--muted);text-align:center;padding:14px 0}
+  .barwrap{display:flex;align-items:center;gap:6px}
+  .bartrack{flex:1;height:7px;background:#eef1f4;border-radius:4px;overflow:hidden;min-width:40px}
+  .barfill{height:100%;background:var(--bar);border-radius:4px}
+  .barval{font-size:11px;color:var(--muted);width:46px;text-align:right}
+  .chart{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+  .chart .rowc{display:grid;grid-template-columns:40px 1fr 56px;align-items:center;gap:6px;margin:3px 0;font-size:11px}
+  .chart .lbl{color:var(--muted)}
+  .chart .track{height:12px;background:#eef1f4;border-radius:3px;overflow:hidden}
+  .chart .fill{height:100%;background:var(--bar);border-radius:3px}
+  .chart .val{text-align:right}
+  .yearbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .yearbar select{padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;color:var(--ink);background:#fff}
+  .notice{background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+          border-radius:8px;padding:7px 10px;font-size:11px;line-height:1.5;margin-bottom:10px}
+  .actions{display:flex;gap:8px;margin:10px 0 4px}
+  .actions button{flex:1;height:34px;border-radius:8px;font-size:13px;cursor:pointer;
+                  border:1px solid var(--border);background:#fff;color:var(--ink)}
+  .actions #csvBtn{background:var(--brand);color:#fff;border-color:var(--brand)}
+  details.standards{margin-top:14px;border-top:1px dashed var(--border);padding-top:8px}
+  details.standards summary{font-size:12px;color:var(--muted);cursor:pointer}
+  .std-cat{border:1px solid var(--border);border-radius:8px;padding:7px 9px;margin-top:6px;font-size:11px}
+  .std-cat .nm{font-weight:600;font-size:12px}
+  .std-cat .ex,.std-cat .nt{color:var(--muted);margin-top:2px}
+  @media (max-width:980px){.side{display:none}}
+</style>
+</head>
+<body>
+<header>🪨 废纸回收 Agent 对话助手
+  <span class="sub">v1.5.0 · 全国+省级 · 历年 · 八大类 · 企业分布 · CSV 导出</span>
+  <span class="off">离线单文件版 · 不需要联网</span>
+</header>
+<div class="layout">
+  <div class="chat">
+    <div class="messages" id="messages"></div>
+    <div class="chips" id="chips"></div>
+    <div class="inputbar">
+      <input id="input" placeholder="输入：纸箱 2kg / 山东省回收量 / 2020年分类数据 / 企业名录"
+             onkeydown="if(event.key==='Enter')send()" />
+      <button onclick="send()">发送</button>
+    </div>
+  </div>
+  <aside class="side">
+    <div class="tabs">
+      <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
+      <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
+      <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
+      <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
+    </div>
+
+    <section class="pane active" id="pane-region">
+      <div class="crumb" id="crumb" style="font-size:12.5px;margin-bottom:8px;color:var(--brand);cursor:pointer"></div>
+      <div class="summary" id="summary"></div>
+      <div class="notice">只提供<b>全国</b>与<b>省级</b>两级统计。市级、县级无公开权威数据，故不提供。
+        山东、广东为公开报道值，其余省份为梯队测算（表中标注）。</div>
+      <div class="sect-title"><span>省级回收量排名（2024 年）</span><span class="hintline">点击行查看该省</span></div>
+      <div class="scroll">
+        <table id="provTable"><thead><tr>
+          <th class="num">#</th><th>区域</th><th class="num">回收量(万吨)</th>
+          <th class="num">占比(%)</th><th>数据</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="actions">
+        <button onclick="goNational()">返回全国</button>
+        <button id="csvBtn" onclick="exportCSV()">导出 CSV</button>
+      </div>
+    </section>
+
+    <section class="pane" id="pane-history">
+      <div class="yearbar"><span>数据年份</span><select id="yearSel" onchange="changeYear(this.value)"></select></div>
+      <div class="sect-title"><span>回收量走势（万吨）</span><span class="hintline" id="histScope"></span></div>
+      <div class="chart" id="histChart"></div>
+      <div class="sect-title"><span>历年明细</span><span class="hintline">中国造纸协会年度报告</span></div>
+      <div class="scroll"><table id="histTable"><thead><tr>
+        <th class="num">年份</th><th class="num">回收量</th><th class="num">同比</th>
+        <th class="num">回收率</th><th class="num">利用率</th><th class="num">进口量</th>
+        </tr></thead><tbody></tbody></table></div>
+      <div class="sect-title"><span>废纸进口量（万吨）</span><span class="hintline">2021 年禁废令后清零</span></div>
+      <div class="chart" id="impChart"></div>
+    </section>
+
+    <section class="pane" id="pane-category">
+      <div class="yearbar"><span>数据年份</span><select id="yearSel2" onchange="changeYear(this.value)"></select>
+        <span id="catScope"></span></div>
+      <div class="notice">官方<b>未逐类公布</b>回收量。下表为「行业结构占比 × 当年回收量」估算，
+        占比按 2015/2020/2025 三锚点插值，货值按参考价估算。</div>
+      <div class="sect-title"><span>八大类回收量（GB/T 20811-2018）</span><span class="hintline" id="catTotal"></span></div>
+      <div class="chart" id="catChart"></div>
+      <div class="scroll" style="max-height:320px"><table id="catTable"><thead><tr>
+        <th class="num">代码</th><th>类别</th><th class="num">占比</th>
+        <th class="num">回收量(万吨)</th><th class="num">货值(亿元)</th>
+        </tr></thead><tbody></tbody></table></div>
+      <details class="standards"><summary>内部参考：GB/T 20811-2018 分类技术要求</summary>
+        <div id="standardsBody"></div></details>
+    </section>
+
+    <section class="pane" id="pane-enterprise">
+      <div class="yearbar"><span>省份</span><select id="entProv" onchange="renderEnt()"></select>
+        <span>大类</span><select id="entCat" onchange="renderEnt()"></select>
+        <span>类型</span><select id="entType" onchange="renderEnt()"></select></div>
+      <div class="notice" id="entNotice"></div>
+      <div class="sect-title"><span>企业地理分布（示意图）</span><span class="hintline" id="entTotal"></span></div>
+      <div class="chart" style="padding:4px"><svg id="entMap" viewBox="0 0 480 300"
+        style="width:100%;height:300px;display:block"></svg></div>
+      <div class="sect-title"><span>按类型</span><span class="hintline">家数 / 万吨</span></div>
+      <div class="chart" id="entTypeChart"></div>
+      <div class="sect-title"><span>企业明细</span><span class="hintline">按年回收量降序</span></div>
+      <div class="scroll" style="max-height:260px"><table id="entTable"><thead><tr>
+        <th>企业</th><th>城市</th><th>类型</th><th class="num">年回收量(万吨)</th><th>主营</th>
+        </tr></thead><tbody></tbody></table></div>
+    </section>
+  </aside>
+</div>
+
+<script>
+const D = {"version": "1.5.0", "national": {"name": "全国", "year": 2024, "stats": {"回收量(万吨)": 6971.0, "纸及纸板产量(万吨)": 13625.0, "回收率(%)": 51.1, "利用率(%)": 51.6, "回收企业数(家)": 4200, "从业人员(人)": 620000}, "provenance": "官方（中国造纸协会《中国造纸工业2024年度报告》）"}, "provinces": [{"code": "370000", "name": "山东省", "rank": 1, "tier": "已公布", "quality": "reported", "stats": {"回收量(万吨)": 763.0, "纸及纸板产量(万吨)": 1502.0, "回收率(%)": 53.0, "利用率(%)": 50.8, "回收企业数(家)": 420, "从业人员(人)": 64855, "占全国比重(%)": 10.95}}, {"code": "440000", "name": "广东省", "rank": 2, "tier": "已公布", "quality": "reported", "stats": {"回收量(万吨)": 733.0, "纸及纸板产量(万吨)": 1457.3, "回收率(%)": 51.0, "利用率(%)": 50.3, "回收企业数(家)": 403, "从业人员(人)": 62305, "占全国比重(%)": 10.51}}, {"code": "410000", "name": "河南省", "rank": 3, "tier": "第一梯队（>500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 524.3, "纸及纸板产量(万吨)": 1074.4, "回收率(%)": 47.6, "利用率(%)": 48.8, "回收企业数(家)": 288, "从业人员(人)": 44565, "占全国比重(%)": 7.52}}, {"code": "320000", "name": "江苏省", "rank": 4, "tier": "第一梯队（>500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 511.8, "纸及纸板产量(万吨)": 947.8, "回收率(%)": 49.5, "利用率(%)": 54.0, "回收企业数(家)": 281, "从业人员(人)": 43503, "占全国比重(%)": 7.34}}, {"code": "330000", "name": "浙江省", "rank": 5, "tier": "第一梯队（>500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 493.0, "纸及纸板产量(万吨)": 974.3, "回收率(%)": 51.9, "利用率(%)": 50.6, "回收企业数(家)": 271, "从业人员(人)": 41905, "占全国比重(%)": 7.07}}, {"code": "360000", "name": "江西省", "rank": 6, "tier": "第一梯队（>500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 492.1, "纸及纸板产量(万吨)": 980.3, "回收率(%)": 53.3, "利用率(%)": 50.2, "回收企业数(家)": 271, "从业人员(人)": 41828, "占全国比重(%)": 7.06}}, {"code": "510000", "name": "四川省", "rank": 7, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 300.2, "纸及纸板产量(万吨)": 581.8, "回收率(%)": 51.8, "利用率(%)": 51.6, "回收企业数(家)": 165, "从业人员(人)": 25517, "占全国比重(%)": 4.31}}, {"code": "450000", "name": "广西壮族自治区", "rank": 8, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 299.7, "纸及纸板产量(万吨)": 571.9, "回收率(%)": 52.8, "利用率(%)": 52.4, "回收企业数(家)": 165, "从业人员(人)": 25474, "占全国比重(%)": 4.3}}, {"code": "110000", "name": "北京市", "rank": 9, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 297.0, "纸及纸板产量(万吨)": 564.6, "回收率(%)": 49.0, "利用率(%)": 52.6, "回收企业数(家)": 163, "从业人员(人)": 25245, "占全国比重(%)": 4.26}}, {"code": "340000", "name": "安徽省", "rank": 10, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 295.2, "纸及纸板产量(万吨)": 568.8, "回收率(%)": 51.8, "利用率(%)": 51.9, "回收企业数(家)": 162, "从业人员(人)": 25092, "占全国比重(%)": 4.23}}, {"code": "420000", "name": "湖北省", "rank": 11, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 283.7, "纸及纸板产量(万吨)": 545.6, "回收率(%)": 49.7, "利用率(%)": 52.0, "回收企业数(家)": 156, "从业人员(人)": 24114, "占全国比重(%)": 4.07}}, {"code": "500000", "name": "重庆市", "rank": 12, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 280.5, "纸及纸板产量(万吨)": 517.5, "回收率(%)": 50.3, "利用率(%)": 54.2, "回收企业数(家)": 154, "从业人员(人)": 23842, "占全国比重(%)": 4.02}}, {"code": "350000", "name": "福建省", "rank": 13, "tier": "第二梯队（200–500 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 276.7, "纸及纸板产量(万吨)": 551.2, "回收率(%)": 53.8, "利用率(%)": 50.2, "回收企业数(家)": 152, "从业人员(人)": 23520, "占全国比重(%)": 3.97}}, {"code": "430000", "name": "湖南省", "rank": 14, "tier": "第三梯队（100–200 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 137.4, "纸及纸板产量(万吨)": 277.6, "回收率(%)": 51.4, "利用率(%)": 49.5, "回收企业数(家)": 76, "从业人员(人)": 11679, "占全国比重(%)": 1.97}}, {"code": "140000", "name": "山西省", "rank": 15, "tier": "第三梯队（100–200 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 136.8, "纸及纸板产量(万吨)": 273.1, "回收率(%)": 49.6, "利用率(%)": 50.1, "回收企业数(家)": 75, "从业人员(人)": 11628, "占全国比重(%)": 1.96}}, {"code": "310000", "name": "上海市", "rank": 16, "tier": "第三梯队（100–200 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 135.9, "纸及纸板产量(万吨)": 258.4, "回收率(%)": 48.4, "利用率(%)": 52.6, "回收企业数(家)": 75, "从业人员(人)": 11552, "占全国比重(%)": 1.95}}, {"code": "520000", "name": "贵州省", "rank": 17, "tier": "第三梯队（100–200 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 128.0, "纸及纸板产量(万吨)": 235.7, "回收率(%)": 53.3, "利用率(%)": 54.3, "回收企业数(家)": 70, "从业人员(人)": 10880, "占全国比重(%)": 1.84}}, {"code": "130000", "name": "河北省", "rank": 18, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 55.4, "纸及纸板产量(万吨)": 107.4, "回收率(%)": 47.4, "利用率(%)": 51.6, "回收企业数(家)": 30, "从业人员(人)": 4709, "占全国比重(%)": 0.79}}, {"code": "630000", "name": "青海省", "rank": 19, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 53.4, "纸及纸板产量(万吨)": 99.3, "回收率(%)": 50.1, "利用率(%)": 53.8, "回收企业数(家)": 29, "从业人员(人)": 4539, "占全国比重(%)": 0.77}}, {"code": "230000", "name": "黑龙江省", "rank": 20, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.9, "纸及纸板产量(万吨)": 103.1, "回收率(%)": 51.3, "利用率(%)": 51.3, "回收企业数(家)": 29, "从业人员(人)": 4496, "占全国比重(%)": 0.76}}, {"code": "710000", "name": "中国台湾", "rank": 21, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.9, "纸及纸板产量(万吨)": 107.1, "回收率(%)": 52.4, "利用率(%)": 49.4, "回收企业数(家)": 29, "从业人员(人)": 4496, "占全国比重(%)": 0.76}}, {"code": "540000", "name": "西藏自治区", "rank": 22, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.7, "纸及纸板产量(万吨)": 101.0, "回收率(%)": 52.9, "利用率(%)": 52.2, "回收企业数(家)": 29, "从业人员(人)": 4480, "占全国比重(%)": 0.76}}, {"code": "210000", "name": "辽宁省", "rank": 23, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.6, "纸及纸板产量(万吨)": 105.2, "回收率(%)": 54.5, "利用率(%)": 50.0, "回收企业数(家)": 29, "从业人员(人)": 4471, "占全国比重(%)": 0.75}}, {"code": "610000", "name": "陕西省", "rank": 24, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.5, "纸及纸板产量(万吨)": 102.1, "回收率(%)": 50.9, "利用率(%)": 51.4, "回收企业数(家)": 29, "从业人员(人)": 4462, "占全国比重(%)": 0.75}}, {"code": "820000", "name": "中国澳门", "rank": 25, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.3, "纸及纸板产量(万吨)": 97.9, "回收率(%)": 50.1, "利用率(%)": 53.4, "回收企业数(家)": 29, "从业人员(人)": 4446, "占全国比重(%)": 0.75}}, {"code": "810000", "name": "中国香港", "rank": 26, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 52.0, "纸及纸板产量(万吨)": 97.9, "回收率(%)": 47.6, "利用率(%)": 53.1, "回收企业数(家)": 29, "从业人员(人)": 4420, "占全国比重(%)": 0.75}}, {"code": "150000", "name": "内蒙古自治区", "rank": 27, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 51.6, "纸及纸板产量(万吨)": 101.4, "回收率(%)": 50.3, "利用率(%)": 50.9, "回收企业数(家)": 28, "从业人员(人)": 4386, "占全国比重(%)": 0.74}}, {"code": "120000", "name": "天津市", "rank": 28, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 51.2, "纸及纸板产量(万吨)": 95.9, "回收率(%)": 53.6, "利用率(%)": 53.4, "回收企业数(家)": 28, "从业人员(人)": 4352, "占全国比重(%)": 0.73}}, {"code": "460000", "name": "海南省", "rank": 29, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 51.2, "纸及纸板产量(万吨)": 93.9, "回收率(%)": 47.8, "利用率(%)": 54.5, "回收企业数(家)": 28, "从业人员(人)": 4352, "占全国比重(%)": 0.73}}, {"code": "640000", "name": "宁夏回族自治区", "rank": 30, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 51.1, "纸及纸板产量(万吨)": 93.9, "回收率(%)": 52.9, "利用率(%)": 54.4, "回收企业数(家)": 28, "从业人员(人)": 4344, "占全国比重(%)": 0.73}}, {"code": "220000", "name": "吉林省", "rank": 31, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 50.6, "纸及纸板产量(万吨)": 97.3, "回收率(%)": 51.4, "利用率(%)": 52.0, "回收企业数(家)": 28, "从业人员(人)": 4301, "占全国比重(%)": 0.73}}, {"code": "620000", "name": "甘肃省", "rank": 32, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 50.6, "纸及纸板产量(万吨)": 92.7, "回收率(%)": 47.7, "利用率(%)": 54.6, "回收企业数(家)": 28, "从业人员(人)": 4301, "占全国比重(%)": 0.73}}, {"code": "650000", "name": "新疆维吾尔自治区", "rank": 33, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 50.1, "纸及纸板产量(万吨)": 98.0, "回收率(%)": 51.9, "利用率(%)": 51.1, "回收企业数(家)": 28, "从业人员(人)": 4258, "占全国比重(%)": 0.72}}, {"code": "530000", "name": "云南省", "rank": 34, "tier": "第四梯队（<100 万吨）", "quality": "estimated", "stats": {"回收量(万吨)": 49.6, "纸及纸板产量(万吨)": 92.4, "回收率(%)": 49.3, "利用率(%)": 53.7, "回收企业数(家)": 27, "从业人员(人)": 4216, "占全国比重(%)": 0.71}}], "history": [{"year": 2014, "recovery": 4841.0, "consumption": 7593.0, "recovery_rate": 48.1, "utilization": 72.5, "yoy": null, "import": null, "paper_output": null, "note": "年度报告"}, {"year": 2016, "recovery": 4964.0, "consumption": null, "recovery_rate": 47.6, "utilization": null, "yoy": 2.54, "import": null, "paper_output": null, "note": "年度报告"}, {"year": 2019, "recovery": 5244.0, "consumption": 6280.0, "recovery_rate": 49.0, "utilization": 58.3, "yoy": 5.64, "import": 1036.0, "paper_output": null, "note": "年度报告"}, {"year": 2020, "recovery": 5493.0, "consumption": 6182.0, "recovery_rate": 46.4, "utilization": 54.9, "yoy": 4.75, "import": 689.0, "paper_output": null, "note": "年度报告"}, {"year": 2021, "recovery": 6491.0, "consumption": 6545.0, "recovery_rate": 51.3, "utilization": 54.1, "yoy": 18.17, "import": 54.0, "paper_output": null, "note": "年度报告"}, {"year": 2022, "recovery": 6585.0, "consumption": 6641.0, "recovery_rate": 53.1, "utilization": 53.5, "yoy": 1.45, "import": 0.0, "paper_output": null, "note": "年度报告"}, {"year": 2023, "recovery": 6737.0, "consumption": 6795.0, "recovery_rate": 51.2, "utilization": 52.4, "yoy": 2.31, "import": 0.0, "paper_output": null, "note": "年度报告"}, {"year": 2024, "recovery": 6971.0, "consumption": 7030.0, "recovery_rate": 51.1, "utilization": 51.6, "yoy": 3.47, "import": 0.0, "paper_output": 13625.0, "note": "年度报告"}, {"year": 2025, "recovery": 7195.0, "consumption": null, "recovery_rate": 51.8, "utilization": null, "yoy": 3.21, "import": 0.0, "paper_output": 14135.0, "note": "初步核算"}], "imports": [{"year": 2017, "value": 2572.0}, {"year": 2018, "value": 1703.0}, {"year": 2019, "value": 1036.0}, {"year": 2020, "value": 689.0}, {"year": 2021, "value": 54.0}, {"year": 2022, "value": 0.0}, {"year": 2023, "value": 0.0}, {"year": 2024, "value": 0.0}, {"year": 2025, "value": 0.0}], "shares": {"2014": {"1": 52.0, "2": 8.0, "3": 6.0, "4": 13.0, "5": 9.0, "6": 4.0, "7": 3.0, "8": 5.0}, "2016": {"1": 52.8, "2": 8.0, "3": 6.0, "4": 11.8, "5": 8.6, "6": 4.0, "7": 3.0, "8": 5.8}, "2019": {"1": 55.2, "2": 8.0, "3": 6.0, "4": 8.2, "5": 7.4, "6": 4.0, "7": 3.0, "8": 8.2}, "2020": {"1": 56.0, "2": 8.0, "3": 6.0, "4": 7.0, "5": 7.0, "6": 4.0, "7": 3.0, "8": 9.0}, "2021": {"1": 56.4, "2": 8.0, "3": 6.0, "4": 6.3, "5": 6.6, "6": 4.0, "7": 3.0, "8": 9.7}, "2022": {"1": 56.8, "2": 8.0, "3": 6.0, "4": 5.6, "5": 6.2, "6": 4.0, "7": 3.0, "8": 10.4}, "2023": {"1": 57.2, "2": 8.0, "3": 6.0, "4": 4.9, "5": 5.8, "6": 4.0, "7": 3.0, "8": 11.1}, "2024": {"1": 57.6, "2": 8.0, "3": 6.0, "4": 4.2, "5": 5.4, "6": 4.0, "7": 3.0, "8": 11.8}, "2025": {"1": 58.0, "2": 8.0, "3": 6.0, "4": 3.5, "5": 5.0, "6": 4.0, "7": 3.0, "8": 12.5}}, "catmeta": {"1": {"name": "废瓦楞纸箱类", "price": 0.95, "use": "箱板纸、瓦楞原纸；回收体量最大、价格波动最敏感"}, "2": {"name": "废纸盒及废卡纸类", "price": 0.85, "use": "白板纸、涂布白卡纸；工厂切边品质最稳定"}, "3": {"name": "包装废纸类", "price": 0.9, "use": "包装用纸；杂质要求最严，价格较高"}, "4": {"name": "废新闻纸类", "price": 0.8, "use": "新闻纸、低定量文化用纸；受报纸发行量下滑影响，体量持续萎缩"}, "5": {"name": "废书刊杂志类", "price": 0.7, "use": "文化用纸、纸板芯层；混合旧书刊价格低于白切边"}, "6": {"name": "办公废纸类", "price": 1.1, "use": "高档文化用纸、生活用纸；白度高、单价最高"}, "7": {"name": "特种废纸类", "price": 1.3, "use": "特种纸；量小价高，需专用渠道"}, "8": {"name": "混合废纸类", "price": 0.55, "use": "纸板芯层、低档包装纸；803 为不鼓励贸易类别"}}, "years": [2014, 2016, 2019, 2020, 2021, 2022, 2023, 2024, 2025], "national_year": 2024, "latest_year": 2025, "enterprises": [{"id": "E001", "name": "鲁清再生资源有限公司", "province_code": "370000", "city": "济南市", "type": "分拣打包中心", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 26.0, "lat": 35.05, "lon": 116.261, "note": "辐射鲁中，纸箱为主", "is_demo": true}, {"id": "E002", "name": "青岛海岳废纸分拣中心", "province_code": "370000", "city": "青岛市", "type": "分拣打包中心", "categories": ["1", "2"], "category_names": ["废瓦楞纸箱类", "废纸盒及废卡纸类"], "volume": 18.5, "lat": 37.271, "lon": 118.012, "note": "港口周边，外贸包装来源多", "is_demo": true}, {"id": "E003", "name": "山东晨鸣纸业原料基地", "province_code": "370000", "city": "潍坊市", "type": "造纸企业", "categories": ["1", "5"], "category_names": ["废瓦楞纸箱类", "废书刊杂志类"], "volume": 42.0, "lat": 35.981, "lon": 116.344, "note": "自建回收网络，直接制浆", "is_demo": true}, {"id": "E004", "name": "临沂商城废纸回收站", "province_code": "370000", "city": "临沂市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 2.4, "lat": 36.055, "lon": 117.783, "note": "批发市场前端回收", "is_demo": true}, {"id": "E005", "name": "粤丰再生资源集团", "province_code": "440000", "city": "广州市", "type": "分拣打包中心", "categories": ["1", "6"], "category_names": ["废瓦楞纸箱类", "办公废纸类"], "volume": 31.0, "lat": 21.68, "lon": 111.425, "note": "珠三角集散中心", "is_demo": true}, {"id": "E006", "name": "东莞纸源回收有限公司", "province_code": "440000", "city": "东莞市", "type": "贸易商", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 12.6, "lat": 23.351, "lon": 113.581, "note": "跨市调货，价格敏感", "is_demo": true}, {"id": "E007", "name": "玖龙纸业（东莞）原料部", "province_code": "440000", "city": "东莞市", "type": "造纸企业", "categories": ["1"], "category_names": ["废瓦楞纸箱类"], "volume": 55.0, "lat": 21.824, "lon": 113.946, "note": "箱板纸原料，量大", "is_demo": true}, {"id": "E008", "name": "深圳南山办公废纸回收点", "province_code": "440000", "city": "深圳市", "type": "回收站点", "categories": ["6", "5"], "category_names": ["办公废纸类", "废书刊杂志类"], "volume": 1.8, "lat": 22.586, "lon": 114.29, "note": "写字楼集中区，白度高", "is_demo": true}, {"id": "E009", "name": "豫中再生资源产业园", "province_code": "410000", "city": "郑州市", "type": "分拣打包中心", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 22.0, "lat": 34.862, "lon": 111.468, "note": "园区化运营", "is_demo": true}, {"id": "E010", "name": "洛阳纸品回收站", "province_code": "410000", "city": "洛阳市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 1.5, "lat": 35.956, "lon": 114.346, "note": "城区前端回收", "is_demo": true}, {"id": "E011", "name": "赣鑫废纸贸易有限公司", "province_code": "360000", "city": "南昌市", "type": "贸易商", "categories": ["1", "3"], "category_names": ["废瓦楞纸箱类", "包装废纸类"], "volume": 14.2, "lat": 29.563, "lon": 115.08, "note": "向浙闽调货", "is_demo": true}, {"id": "E012", "name": "江西理文造纸原料公司", "province_code": "360000", "city": "九江市", "type": "造纸企业", "categories": ["1", "2"], "category_names": ["废瓦楞纸箱类", "废纸盒及废卡纸类"], "volume": 38.0, "lat": 28.405, "lon": 117.571, "note": "沿江布局，水运成本低", "is_demo": true}, {"id": "E013", "name": "浙北废纸分拣中心", "province_code": "330000", "city": "湖州市", "type": "分拣打包中心", "categories": ["1", "2", "3"], "category_names": ["废瓦楞纸箱类", "废纸盒及废卡纸类", "包装废纸类"], "volume": 19.8, "lat": 28.833, "lon": 119.952, "note": "包装纸产业带配套", "is_demo": true}, {"id": "E014", "name": "宁波港废纸集散中心", "province_code": "330000", "city": "宁波市", "type": "贸易商", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 16.4, "lat": 30.417, "lon": 120.616, "note": "进口替代后的内贸枢纽", "is_demo": true}, {"id": "E015", "name": "苏南再生资源有限公司", "province_code": "320000", "city": "苏州市", "type": "分拣打包中心", "categories": ["1", "6"], "category_names": ["废瓦楞纸箱类", "办公废纸类"], "volume": 21.5, "lat": 31.532, "lon": 120.556, "note": "电子制造业办公废纸多", "is_demo": true}, {"id": "E016", "name": "南京城北回收站点", "province_code": "320000", "city": "南京市", "type": "回收站点", "categories": ["8", "5"], "category_names": ["混合废纸类", "废书刊杂志类"], "volume": 1.2, "lat": 31.846, "lon": 120.881, "note": "社区混合废纸", "is_demo": true}, {"id": "E017", "name": "鄂中废纸回收中心", "province_code": "420000", "city": "武汉市", "type": "分拣打包中心", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 13.7, "lat": 30.436, "lon": 115.092, "note": "九省通衢，调货便利", "is_demo": true}, {"id": "E018", "name": "川渝纸业原料公司", "province_code": "510000", "city": "成都市", "type": "造纸企业", "categories": ["1", "5"], "category_names": ["废瓦楞纸箱类", "废书刊杂志类"], "volume": 17.3, "lat": 32.128, "lon": 104.396, "note": "西南区域龙头", "is_demo": true}, {"id": "E019", "name": "重庆两江回收站", "province_code": "500000", "city": "重庆市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 2.1, "lat": 31.08, "lon": 107.637, "note": "城区前端", "is_demo": true}, {"id": "E020", "name": "闽南废纸贸易商行", "province_code": "350000", "city": "厦门市", "type": "贸易商", "categories": ["1", "3"], "category_names": ["废瓦楞纸箱类", "包装废纸类"], "volume": 9.6, "lat": 25.587, "lon": 119.78, "note": "对台贸易通道", "is_demo": true}, {"id": "E021", "name": "皖江再生资源中心", "province_code": "340000", "city": "芜湖市", "type": "分拣打包中心", "categories": ["1", "2"], "category_names": ["废瓦楞纸箱类", "废纸盒及废卡纸类"], "volume": 11.2, "lat": 31.028, "lon": 115.45, "note": "沿江造纸带配套", "is_demo": true}, {"id": "E022", "name": "桂南废纸回收站", "province_code": "450000", "city": "南宁市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 1.6, "lat": 24.106, "lon": 108.839, "note": "县域覆盖", "is_demo": true}, {"id": "E023", "name": "京津冀再生资源集散中心", "province_code": "110000", "city": "北京市", "type": "分拣打包中心", "categories": ["6", "5", "2"], "category_names": ["办公废纸类", "废书刊杂志类", "废纸盒及废卡纸类"], "volume": 8.4, "lat": 38.514, "lon": 116.318, "note": "办公与书刊废纸为主", "is_demo": true}, {"id": "E024", "name": "津沽废纸分拣厂", "province_code": "120000", "city": "天津市", "type": "分拣打包中心", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 7.9, "lat": 39.687, "lon": 117.138, "note": "港口与制造业配套", "is_demo": true}, {"id": "E025", "name": "湘江纸品回收有限公司", "province_code": "430000", "city": "长沙市", "type": "贸易商", "categories": ["1", "5"], "category_names": ["废瓦楞纸箱类", "废书刊杂志类"], "volume": 6.3, "lat": 27.457, "lon": 113.82, "note": "向鄂赣调货", "is_demo": true}, {"id": "E026", "name": "黔中再生资源站点", "province_code": "520000", "city": "贵阳市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 1.1, "lat": 25.956, "lon": 108.545, "note": "城区前端", "is_demo": true}, {"id": "E027", "name": "陕再生资源打包中心", "province_code": "610000", "city": "西安市", "type": "分拣打包中心", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 5.8, "lat": 34.878, "lon": 106.74, "note": "西北集散", "is_demo": true}, {"id": "E028", "name": "沪上办公废纸回收中心", "province_code": "310000", "city": "上海市", "type": "分拣打包中心", "categories": ["6", "5"], "category_names": ["办公废纸类", "废书刊杂志类"], "volume": 9.1, "lat": 32.427, "lon": 120.141, "note": "写字楼白领区，白度高", "is_demo": true}, {"id": "E029", "name": "辽沈废纸回收站", "province_code": "210000", "city": "沈阳市", "type": "回收站点", "categories": ["1", "8"], "category_names": ["废瓦楞纸箱类", "混合废纸类"], "volume": 1.4, "lat": 41.502, "lon": 121.806, "note": "老工业区", "is_demo": true}, {"id": "E030", "name": "滇中纸品贸易公司", "province_code": "530000", "city": "昆明市", "type": "贸易商", "categories": ["1", "3"], "category_names": ["废瓦楞纸箱类", "包装废纸类"], "volume": 4.2, "lat": 26.042, "lon": 103.471, "note": "面向东南亚边贸", "is_demo": true}], "ent_is_demo": true, "ent_types": ["回收站点", "分拣打包中心", "造纸企业", "贸易商"], "knowledge": [{"name": "办公用纸", "aliases": ["打印纸", "复印纸", "a4", "文件", "办公纸", "办公用纸", "白纸", "资料"], "recyclable": true, "price": 1.1, "tips": "订书钉可保留，回形针建议取下；涉密文件请碎纸后交专业渠道。"}, {"name": "纸箱/纸板", "aliases": ["纸箱", "纸板", "瓦楞纸", "快递箱", "纸盒", "包装盒"], "recyclable": true, "price": 0.9, "tips": "清空内容物、压平折叠，胶带尽量撕掉。"}, {"name": "报纸", "aliases": ["报纸", "新闻纸", "旧报"], "recyclable": true, "price": 0.8, "tips": "去除塑料薄膜与装订后可整捆回收。"}, {"name": "书刊杂志", "aliases": ["杂志", "期刊", "书本", "书", "刊物"], "recyclable": true, "price": 0.7, "tips": "胶装书刊可整体回收；塑料封膜请分离。"}, {"name": "牛皮纸", "aliases": ["牛皮纸", "牛皮纸箱", "牛皮袋"], "recyclable": true, "price": 0.85, "tips": "干净干燥即可回收。"}, {"name": "纸巾/卫生纸", "aliases": ["纸巾", "卫生纸", "餐巾纸", "湿巾"], "recyclable": false, "price": 0.0, "tips": "已被污染且纤维过短，不可进入再生纸系统，请作为其他垃圾处理。"}, {"name": "热敏/涂布纸", "aliases": ["热敏纸", "小票", "收银条", "传真纸", "涂布纸"], "recyclable": false, "price": 0.0, "tips": "表面含显色涂层，不可回收，请作为其他垃圾。"}, {"name": "污染/厨余纸", "aliases": ["油纸", "沾油", "披萨盒", "厨房纸巾", "被污染"], "recyclable": false, "price": 0.0, "tips": "油污、食物残渣会破坏纸浆，不可回收。"}, {"name": "复合包装", "aliases": ["利乐包", "纸塑铝", "牛奶盒", "饮料纸盒"], "recyclable": false, "price": 0.0, "tips": "属纸塑铝复合材质，需专用回收线，请勿投入普通废纸。"}], "gbt": [{"code": "1", "name": "废瓦楞纸箱类", "examples": ["牛皮挂面旧瓦楞纸箱(101)", "新瓦楞纸箱(102)", "混合旧瓦楞纸箱(104)"], "note": "杂质≤1.0%、不可利用物≤3.0%；新箱更严。回收用于箱板纸/瓦楞原纸。"}, {"code": "2", "name": "废纸盒及废卡纸类", "examples": ["工厂回收白色纸盒切边(201)"], "note": "白色纸盒切边杂质≤0.25%、不可利用物≤1.0%。"}, {"code": "3", "name": "包装废纸类", "examples": ["白色包装纸(301)", "牛皮包装纸(302)"], "note": "不应有杂质，不可利用物≤0.5%。"}, {"code": "4", "name": "废新闻纸类", "examples": ["新闻纸切边(401)", "未出售报纸(402)"], "note": "不应有杂质，不可利用物≤0.5%。"}, {"code": "5", "name": "废书刊杂志类", "examples": ["白色未涂布纸切边(501)", "混合旧书刊杂志(505)"], "note": "混合旧书刊杂质≤0.5%、不可利用物≤2.5%。"}, {"code": "6", "name": "办公废纸类", "examples": ["混合办公废纸(606)"], "note": "混合办公废纸杂质≤0.5%、不可利用物≤2.5%。"}, {"code": "7", "name": "特种废纸类", "examples": ["白色湿强废纸(701)", "工厂使用过的特种废纸(709)"], "note": "部分品种不应有杂质；湿强废纸杂质≤0.5%、不可利用物≤2.0%。"}, {"code": "8", "name": "混合废纸类", "examples": ["非纸箱纸盒类混合废纸(801)", "纸箱纸盒类混合废纸(802)", "混合废纸(803)"], "note": "803 为不鼓励贸易类别；杂质≤1.0%~1.5%。"}], "quality_rules": {"水分": "实测水分应 ≤ 12%（或按合同规定）", "质量差百分率": "应 ≥ -1.0%", "包装物质量": "应不大于对应实测质量的 1.0%"}, "sources": ["GB/T 20811-2018《废纸分类技术要求》（国家市场监督管理总局、中国国家标准化管理委员会）", "中国造纸协会《中国造纸工业2024年度报告》（2025-05-07 发布）", "生态环境部等《关于全面禁止进口固体废物有关事项的公告》（2021-01-01 施行）", "中国造纸协会《中国造纸工业年度报告》（历年）", "《中国造纸》期刊：我国废纸回收利用及消费情况统计表", "海关总署 / 中国造纸协会：废纸进出口统计", "GB/T 20811-2018《废纸分类技术要求》", "生态环境部等《关于全面禁止进口固体废物有关事项的公告》（2021-01-01 施行）"]};
+const S = { code: "CN", year: D.national_year };
+
+/* ---------- 通用 ---------- */
+const $ = id => document.getElementById(id);
+function addMsg(text, who) {
+  const d = document.createElement("div");
+  d.className = "msg " + who;
+  d.textContent = text;
+  $("messages").appendChild(d);
+  $("messages").scrollTop = $("messages").scrollHeight;
+}
+["纸箱能回收吗","办公用纸 3kg","山东省回收量","历年数据","分类回收数据","企业名录"].forEach(s => {
+  const c = document.createElement("span");
+  c.className = "chip"; c.textContent = s;
+  c.onclick = () => { $("input").value = s; send(); };
+  $("chips").appendChild(c);
+});
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.pane === name));
+  document.querySelectorAll(".pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
+  if (name === "enterprise") renderEnt();
+}
+
+/* ---------- 区域 ---------- */
+function provByCode(code) { return D.provinces.find(p => p.code === code) || null; }
+function share(code) { const p = provByCode(code); return p ? p.stats["回收量(万吨)"] / D.national.stats["回收量(万吨)"] : 1; }
+
+function renderRegion(code) {
+  S.code = code;
+  const p = provByCode(code);
+  const node = p || D.national;
+  const s = node.stats;
+  $("crumb").innerHTML = p
+    ? `<span onclick="renderRegion('CN')">全国</span> / ${p.name}`
+    : `全国`;
+  const isN = !p;
+  const badge = isN ? `<span class="badge">国家</span>`
+                    : `<span class="badge">省</span><span class="badge grey">${p.tier}</span>`;
+  const extra = isN
+    ? `<div><span>纸及纸板产量</span><b>${s["纸及纸板产量(万吨)"]} 万吨</b></div>
+       <div><span>从业人员</span><b>${s["从业人员(人)"]} 人</b></div>`
+    : `<div><span>占全国比重</span><b>${s["占全国比重(%)"]}%</b></div>
+       <div><span>全国排名</span><b>第 ${p.rank} 位</b></div>`;
+  $("summary").innerHTML =
+    `<div class="sum-name">${node.name} ${badge}</div>
+     <div class="sum-grid">
+       <div><span>回收量</span><b>${s["回收量(万吨)"]} 万吨</b></div>
+       <div><span>回收率</span><b>${s["回收率(%)"]}%</b></div>
+       <div><span>利用率</span><b>${s["利用率(%)"]}%</b></div>
+       <div><span>企业数</span><b>${s["回收企业数(家)"]} 家</b></div>
+       ${extra}
+     </div>
+     <div class="prov">数据年度 ${D.national.year} 年 · ${isN ? D.national.provenance : (p.quality === "reported" ? "回收量为公开报道值，其余测算" : "梯队测算，非官方逐省统计")}</div>`;
+
+  const max = Math.max(...D.provinces.map(x => x.stats["回收量(万吨)"]));
+  document.querySelector("#provTable tbody").innerHTML = D.provinces.map(x =>
+    `<tr class="row${x.code === code ? " hi" : ""}" onclick="renderRegion('${x.code}')">
+       <td class="num">${x.rank}</td><td>${x.name}</td>
+       <td class="num"><div class="barwrap"><div class="bartrack">
+         <div class="barfill" style="width:${(x.stats["回收量(万吨)"]/max*100).toFixed(1)}%"></div></div>
+         <div class="barval">${x.stats["回收量(万吨)"]}</div></div></td>
+       <td class="num">${x.stats["占全国比重(%)"]}</td>
+       <td>${x.quality === "reported" ? "报道" : "测算"}</td></tr>`).join("");
+  renderHistory(); renderCategory();
+}
+function goNational() { renderRegion("CN"); }
+
+/* ---------- 历年 ---------- */
+function renderHistory() {
+  const k = share(S.code);
+  const rows = D.history.filter(h => h.recovery !== null)
+    .map(h => ({ ...h, recovery: +(h.recovery * k).toFixed(1) }));
+  const max = Math.max(...rows.map(h => h.recovery));
+  $("histScope").textContent = S.code === "CN" ? "全国" : "按该省占比折算";
+  $("histChart").innerHTML = rows.map(h =>
+    `<div class="rowc"><div class="lbl">${h.year}</div>
+      <div class="track"><div class="fill" style="width:${(h.recovery/max*100).toFixed(1)}%"></div></div>
+      <div class="val">${h.recovery}</div></div>`).join("");
+
+  document.querySelector("#histTable tbody").innerHTML = D.history.map(h => {
+    const yoy = h.yoy === null ? "—" : (h.yoy > 0 ? "+" : "") + h.yoy + "%";
+    const rec = h.recovery === null ? "—" : +(h.recovery * k).toFixed(1);
+    const util = h.utilization === null ? "—" : h.utilization + "%";
+    const imp = h.import === null || h.import === undefined ? "—" : h.import;
+    return `<tr><td class="num">${h.year}</td><td class="num">${rec}</td>
+      <td class="num">${yoy}</td><td class="num">${h.recovery_rate}%</td>
+      <td class="num">${util}</td><td class="num">${imp}</td></tr>`;
+  }).join("");
+
+  const imax = Math.max(...D.imports.map(r => r.value)) || 1;
+  $("impChart").innerHTML = D.imports.map(r =>
+    `<div class="rowc"><div class="lbl">${r.year}</div>
+      <div class="track"><div class="fill" style="width:${(r.value/imax*100).toFixed(1)}%;background:var(--bar2)"></div></div>
+      <div class="val">${r.value}</div></div>`).join("");
+}
+
+/* ---------- 分类 ---------- */
+function catRows(year) {
+  const k = share(S.code);
+  const total = (D.history.find(h => h.year === year) || {}).recovery || 0;
+  const base = total * k;
+  const shares = D.shares[year] || D.shares[D.latest_year];
+  return Object.keys(D.catmeta).sort().map(code => {
+    const m = D.catmeta[code];
+    const sh = shares[code];
+    const t = +(base * sh / 100).toFixed(1);
+    return { code, name: m.name, share: sh, tonnage: t, price: m.price,
+             value: +(t * m.price * 0.1).toFixed(1), use: m.use };
+  });
+}
+function renderCategory() {
+  const rows = catRows(S.year);
+  const total = rows.reduce((s, r) => s + r.tonnage, 0);
+  const max = Math.max(...rows.map(r => r.share));
+  $("catScope").textContent = S.code === "CN" ? "全国" : provByCode(S.code).name;
+  $("catTotal").textContent = `合计 ${total.toFixed(1)} 万吨`;
+  $("catChart").innerHTML = rows.map(r =>
+    `<div class="rowc" style="grid-template-columns:118px 1fr 62px">
+      <div class="lbl">${r.name}</div>
+      <div class="track"><div class="fill" style="width:${(r.share/max*100).toFixed(1)}%"></div></div>
+      <div class="val">${r.share}%</div></div>`).join("");
+  document.querySelector("#catTable tbody").innerHTML = rows.map(r =>
+    `<tr title="${r.use}"><td class="num">${r.code}</td><td>${r.name}</td>
+      <td class="num">${r.share}%</td><td class="num">${r.tonnage}</td>
+      <td class="num">${r.value}</td></tr>`).join("");
+}
+function changeYear(y) {
+  S.year = parseInt(y, 10);
+  $("yearSel").value = S.year; $("yearSel2").value = S.year;
+  renderCategory();
+}
+
+/* ---------- 企业 ---------- */
+const ENT_COLORS = {"回收站点":"#8fbfa3","分拣打包中心":"#4a9d6b","造纸企业":"#1f5c3a","贸易商":"#b7a06a"};
+function initEnt() {
+  $("entProv").innerHTML = `<option value="">全部省份</option>` +
+    D.provinces.map(p => `<option value="${p.code}">${p.name}</option>`).join("");
+  $("entCat").innerHTML = `<option value="">全部大类</option>` +
+    Object.keys(D.catmeta).sort().map(c => `<option value="${c}">${c} ${D.catmeta[c].name}</option>`).join("");
+  $("entType").innerHTML = `<option value="">全部类型</option>` +
+    D.ent_types.map(t => `<option value="${t}">${t}</option>`).join("");
+  $("entNotice").innerHTML = D.ent_is_demo
+    ? `当前为<b>示例企业名录</b>（名称为虚构），用于演示「企业 × 地理位置 × 品类」分析。`
+    : `当前为<b>自有企业名录</b>。`;
+}
+function entList() {
+  const p = $("entProv").value, c = $("entCat").value, t = $("entType").value;
+  return D.enterprises.filter(e =>
+    (!p || e.province_code === p) && (!c || e.categories.includes(c)) && (!t || e.type === t)
+  ).sort((a, b) => b.volume - a.volume);
+}
+function renderEnt() {
+  const list = entList();
+  const X = lon => 22 + (lon - 73) / (135 - 73) * 436;
+  const Y = lat => 14 + (54 - lat) / (54 - 18) * 272;
+  const svg = $("entMap");
+  if (!list.length) {
+    svg.innerHTML = `<text x="240" y="150" text-anchor="middle" fill="#6b7280" font-size="12">当前筛选没有企业</text>`;
+  } else {
+    const mv = Math.max(...list.map(e => e.volume));
+    let out = `<rect x="1" y="1" width="478" height="298" fill="#fbfcfd" stroke="#e5e7eb" rx="6"/>`;
+    for (let lon = 80; lon <= 130; lon += 10) {
+      out += `<line x1="${X(lon)}" y1="14" x2="${X(lon)}" y2="286" stroke="#eef1f4"/>`
+           + `<text x="${X(lon)}" y="296" font-size="9" fill="#9aa3af" text-anchor="middle">${lon}°E</text>`;
+    }
+    for (let lat = 20; lat <= 50; lat += 10) {
+      out += `<line x1="22" y1="${Y(lat)}" x2="458" y2="${Y(lat)}" stroke="#eef1f4"/>`
+           + `<text x="2" y="${Y(lat)+3}" font-size="9" fill="#9aa3af">${lat}°N</text>`;
+    }
+    list.forEach(e => {
+      const r = (3 + Math.sqrt(e.volume / mv) * 9).toFixed(1);
+      out += `<circle cx="${X(e.lon).toFixed(1)}" cy="${Y(e.lat).toFixed(1)}" r="${r}"
+        fill="${ENT_COLORS[e.type] || "#4a9d6b"}" fill-opacity="0.72" stroke="#fff" stroke-width="1">
+        <title>${e.name}\n${e.city} · ${e.type}\n年回收量 ${e.volume} 万吨\n主营 ${e.category_names.join("、")}</title></circle>`;
+    });
+    let lx = 30;
+    Object.keys(ENT_COLORS).forEach(t => {
+      out += `<circle cx="${lx}" cy="10" r="3.5" fill="${ENT_COLORS[t]}"/>`
+           + `<text x="${lx+7}" y="13" font-size="9" fill="#6b7280">${t}</text>`;
+      lx += 78;
+    });
+    svg.innerHTML = out;
+  }
+
+  const byType = {};
+  D.ent_types.forEach(t => byType[t] = { count: 0, volume: 0 });
+  list.forEach(e => { byType[e.type].count++; byType[e.type].volume += e.volume; });
+  const tv = Math.max(...Object.values(byType).map(v => v.volume), 1);
+  $("entTypeChart").innerHTML = Object.keys(byType).filter(t => byType[t].count).map(t =>
+    `<div class="rowc" style="grid-template-columns:96px 1fr 74px">
+      <div class="lbl">${t}</div>
+      <div class="track"><div class="fill" style="width:${(byType[t].volume/tv*100).toFixed(1)}%;background:${ENT_COLORS[t]}"></div></div>
+      <div class="val">${byType[t].count}家 / ${byType[t].volume.toFixed(1)}</div></div>`).join("");
+
+  $("entTotal").textContent = `${list.length} 家 · 合计 ${list.reduce((s,e)=>s+e.volume,0).toFixed(1)} 万吨`;
+  document.querySelector("#entTable tbody").innerHTML = list.length
+    ? list.map(e => `<tr title="${e.note}"><td>${e.name}</td><td>${e.city}</td><td>${e.type}</td>
+        <td class="num">${e.volume}</td><td>${e.category_names.join("、")}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">当前筛选没有企业</td></tr>`;
+}
+
+/* ---------- 对话（离线规则引擎，与 Python 版同序） ---------- */
+function findProv(text) {
+  if (/全国|中国|国家/.test(text)) return "CN";
+  const hits = D.provinces.filter(p => text.indexOf(p.name) >= 0);
+  if (hits.length) return hits[0].code;
+  const shorts = D.provinces.filter(p => {
+    const s = p.name.replace(/^(中国)?/, "").replace(/(壮族|回族|维吾尔)?自治区$|特别行政区$|省$|市$/, "");
+    return s.length >= 2 && text.indexOf(s) >= 0;
+  });
+  return shorts.length ? shorts[0].code : null;
+}
+function findEnt(text) {
+  const generic = ["废纸","回收","废纸回收","回收站","公司","企业","造纸","纸厂","中心","站点","分拣","打包"];
+  if (text.length < 3 || generic.indexOf(text) >= 0) return null;
+  return D.enterprises.find(e => e.name.indexOf(text) >= 0) || null;
+}
+function catSummary(year) {
+  const rows = catRows(year);
+  const lines = [`【${year} 年废纸回收量按类别拆分（GB/T 20811-2018 八大类）】`,
+                 "说明：官方未逐类公布回收量，下表为「行业结构占比 × 官方回收量」估算。"];
+  rows.forEach(r => lines.push(`- ${r.code} ${r.name}：${r.share}%，约 ${r.tonnage} 万吨，参考价 ${r.price} 元/公斤`));
+  return lines.join("\n");
+}
+function historySummary() {
+  const lines = ["【历年废纸回收利用（中国造纸协会年度报告）】",
+                 "年份　回收量(万吨)　回收率(%)　利用率(%)　废纸进口(万吨)"];
+  D.history.forEach(h => lines.push(
+    `${h.year}　${h.recovery}　${h.recovery_rate}　${h.utilization === null ? "—" : h.utilization}　${h.import === null || h.import === undefined ? "—" : h.import}`));
+  const a = D.history[0], b = D.history[D.history.length - 1];
+  lines.push(`趋势：${a.year}—${b.year} 回收量从 ${a.recovery} 万吨增至 ${b.recovery} 万吨；废纸进口自 2021 年禁废令后清零。`);
+  return lines.join("\n");
+}
+function entSummary(code) {
+  const list = code ? D.enterprises.filter(e => e.province_code === code) : D.enterprises;
+  if (!list.length) return "暂无企业名录数据。";
+  const name = code ? provByCode(code).name : "全国";
+  const tv = list.reduce((s, e) => s + e.volume, 0);
+  const lines = [`【${name}回收企业概览】`];
+  if (D.ent_is_demo) lines.push("注：以下为示例企业名录（虚构名称），用于演示企业维度。");
+  lines.push(`- 收录企业 ${list.length} 家，年回收量合计 ${tv.toFixed(1)} 万吨`);
+  if (code) {
+    const official = provByCode(code).stats["回收量(万吨)"];
+    lines.push(`- 占该省官方回收量（${official} 万吨）的 ${(tv / official * 100).toFixed(1)}%（名录覆盖率）`);
+  }
+  lines.push("", "按类型：");
+  const bt = {};
+  list.forEach(e => { bt[e.type] = bt[e.type] || { c: 0, v: 0 }; bt[e.type].c++; bt[e.type].v += e.volume; });
+  Object.keys(bt).forEach(t => lines.push(`- ${t}：${bt[t].c} 家，${bt[t].v.toFixed(1)} 万吨`));
+  lines.push("", "年回收量前五：");
+  list.slice().sort((a, b) => b.volume - a.volume).slice(0, 5).forEach(e =>
+    lines.push(`  ${e.name}（${e.city}·${e.type}）${e.volume} 万吨，主营 ${e.category_names.join("、")}`));
+  return lines.join("\n");
+}
+function classify(text) {
+  const low = text.toLowerCase();
+  let hit = null;
+  D.knowledge.forEach(k => {
+    if (hit) return;
+    if (k.aliases.some(a => low.indexOf(a) >= 0) || low.indexOf(k.name) >= 0) hit = k;
+  });
+  if (!hit) return "未能识别废纸类型，请描述更具体的物品（如：纸箱、报纸、纸巾、热敏小票）。";
+  return hit.recyclable
+    ? `【${hit.name}】可回收，参考回收价 ${hit.price} 元/公斤。\n提示：${hit.tips}`
+    : `【${hit.name}】不可回收。\n原因：${hit.tips}`;
+}
+function priceOf(text, kg) {
+  const low = text.toLowerCase();
+  const hit = D.knowledge.find(k => k.aliases.some(a => low.indexOf(a) >= 0) || low.indexOf(k.name) >= 0);
+  if (!hit) return "未能识别废纸类型，请描述更具体的物品（如：纸箱、报纸）。";
+  if (!hit.recyclable) return `【${hit.name}】不可回收，回收价值为 0。\n原因：${hit.tips}`;
+  const val = (hit.price * Math.max(kg, 0)).toFixed(2);
+  return `【${hit.name}】${kg} 公斤，参考回收价值约 ${val} 元（按 ${hit.price} 元/公斤估算）。\n提示：${hit.tips}`;
+}
+function respond(text) {
+  if (!text) return "请输入你想查询的废纸物品，例如「纸箱 2kg 能卖多少钱」。";
+  if (["你好","您好","hi","hello","在吗","在么"].indexOf(text.toLowerCase()) >= 0)
+    return "你好，我是废纸回收助手 🪨。可以问我：能不能回收、值多少钱、全国/各省回收量、历年趋势、八大类分类、某省企业。";
+  if (/帮助|help|怎么用|功能|能做什么|用法/.test(text)) {
+    return ["废纸回收助手使用说明：",
+      "1) 是否可回收：直接说物品名，如「纸箱」「纸巾」。",
+      "2) 估算价值：物品名 + 重量，如「办公用纸 3kg」「纸箱 5 斤」。",
+      "3) 分类标准：输入「废纸分类」。",
+      "4) 按类别看回收量：输入「分类回收数据」「2020 年分类数据」。",
+      "5) 历年趋势：输入「历年数据」。",
+      "6) 区域统计（全国与省级）：输入「山东省回收量」。",
+      "7) 企业分布：输入「企业名录」「山东有哪些回收企业」。",
+      "8) 导出：右侧「导出 CSV」。离线版不支持 xlsx，在线版可导出六表 Excel。"].join("\n");
+  }
+  const ent = findEnt(text);
+  if (ent) {
+    return [`【${ent.name}】`, `- 位置：${ent.city}（${ent.lat}, ${ent.lon}）`,
+      `- 类型：${ent.type}`, `- 主营：${ent.category_names.join("、")}`,
+      `- 年回收量：${ent.volume} 万吨`, `- 备注：${ent.note}`,
+      D.ent_is_demo ? "（示例数据）" : ""].filter(Boolean).join("\n");
+  }
+  if (/企业|公司|回收站|回收点|打包厂|分拣中心|造纸厂|贸易商|名录|哪家|厂家/.test(text)) {
+    return entSummary(findProv(text));
+  }
+  if (/分类数据|分类回收|类别占比|各类回收|八大类|按类别|分类占比|品种结构/.test(text)) {
+    const m = text.match(/(20\d{2})/);
+    const y = m && D.years.indexOf(parseInt(m[1], 10)) >= 0 ? parseInt(m[1], 10) : D.latest_year;
+    return catSummary(y);
+  }
+  if (/历年|年份|以前|过去|趋势|增长|变化|这几年|近五年|历史数据/.test(text)) return historySummary();
+  if (/年鉴|行业数据|进口|标准|分类标准|gb\/t|20811|造纸|废纸分几类|废纸分类/.test(text)) {
+    const lines = ["【废纸分类（GB/T 20811-2018，8 大类 42 小类）】"];
+    D.gbt.forEach(c => lines.push(`${c.code}. ${c.name}：${c.examples.join("、")}`));
+    lines.push("", "【2024 年废纸回收利用】", "回收量 6971 万吨、回收率 51.1%、利用率 51.6%。");
+    return lines.join("\n");
+  }
+  if (/回收量|利用率|回收率|统计|企业数|从业人员|数据|排名|占比/.test(text)) {
+    const code = findProv(text) || "CN";
+    const p = provByCode(code);
+    if (!p) return regionText("CN");
+    return regionText(code);
+  }
+  const code = findProv(text);
+  if (code && code !== "CN") return regionText(code);
+  const m = text.match(/(\d+(?:\.\d+)?)\s*(kg|公斤|千克|斤)/i);
+  if (m) {
+    let kg = parseFloat(m[1]);
+    if (m[2] === "斤") kg = kg / 2;
+    return priceOf(text, kg);
+  }
+  return classify(text);
+}
+function regionText(code) {
+  const p = provByCode(code);
+  if (!p) {
+    const n = D.national;
+    const top = D.provinces.slice(0, 5).map(x => `  ${x.rank}. ${x.name} ${x.stats["回收量(万吨)"]} 万吨（占全国 ${x.stats["占全国比重(%)"]}%）`);
+    return [`【全国】废纸回收统计（${n.year} 年，官方）`,
+      `- 回收量：${n.stats["回收量(万吨)"]} 万吨`,
+      `- 回收率：${n.stats["回收率(%)"]}%；利用率：${n.stats["利用率(%)"]}%`,
+      `- 纸及纸板产量：${n.stats["纸及纸板产量(万吨)"]} 万吨`,
+      "回收量前五：", ...top, "", "注：本工具仅提供全国与省级两级统计。"].join("\n");
+  }
+  const s = p.stats;
+  return [`【${p.name}】废纸回收统计（${D.national.year} 年，${p.quality === "reported" ? "回收量为公开报道值" : "梯队测算"}）`,
+    `- 回收量：${s["回收量(万吨)"]} 万吨（占全国 ${s["占全国比重(%)"]}%，第 ${p.rank} 位）`,
+    `- 回收率：${s["回收率(%)"]}%；利用率：${s["利用率(%)"]}%`,
+    `- 纸及纸板产量：${s["纸及纸板产量(万吨)"]} 万吨`,
+    `- 回收企业数：${s["回收企业数(家)"]} 家；从业人员：${s["从业人员(人)"]} 人`,
+    `- 梯队：${p.tier}`, "", "注：本工具仅提供全国与省级两级统计。"].join("\n");
+}
+function send() {
+  const el = $("input");
+  const text = el.value.trim();
+  if (!text) return;
+  addMsg(text, "user");
+  el.value = "";
+  addMsg(respond(text), "bot");
+}
+
+/* ---------- CSV 导出 ---------- */
+function exportCSV() {
+  const lines = [];
+  const push = arr => lines.push(arr.map(v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`).join(","));
+  push(["废纸回收统计（离线版）"]);
+  push(["全国", D.national.year, "回收量(万吨)", D.national.stats["回收量(万吨)"],
+        "回收率(%)", D.national.stats["回收率(%)"], "利用率(%)", D.national.stats["利用率(%)"]]);
+  push([]);
+  push(["一、省级统计（2024 年）"]);
+  push(["排名","区域","梯队","回收量(万吨)","占全国比重(%)","回收率(%)","利用率(%)","数据性质"]);
+  D.provinces.forEach(p => push([p.rank, p.name, p.tier, p.stats["回收量(万吨)"],
+    p.stats["占全国比重(%)"], p.stats["回收率(%)"], p.stats["利用率(%)"],
+    p.quality === "reported" ? "公开报道" : "梯队测算"]));
+  push([]);
+  push([`二、分类回收（${S.year} 年，${S.code === "CN" ? "全国" : provByCode(S.code).name}）`]);
+  push(["代码","类别","占比(%)","回收量(万吨)","参考价(元/公斤)","估算货值(亿元)"]);
+  catRows(S.year).forEach(r => push([r.code, r.name, r.share, r.tonnage, r.price, r.value]));
+  push([]);
+  push(["三、历年回收"]);
+  push(["年份","回收量(万吨)","回收率(%)","利用率(%)","废纸进口(万吨)"]);
+  D.history.forEach(h => push([h.year, h.recovery, h.recovery_rate,
+    h.utilization === null ? "—" : h.utilization,
+    h.import === null || h.import === undefined ? "—" : h.import]));
+  push([]);
+  push(["四、企业名录" + (D.ent_is_demo ? "（示例数据）" : "")]);
+  push(["企业名称","城市","类型","主营大类","年回收量(万吨)","纬度","经度","备注"]);
+  entList().forEach(e => push([e.name, e.city, e.type, e.category_names.join("、"),
+    e.volume, e.lat, e.lon, e.note]));
+
+  const csv = "\uFEFF" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `废纸回收统计_${S.code === "CN" ? "全国" : provByCode(S.code).name}_${S.year}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+
+/* ---------- 初始化 ---------- */
+(function init() {
+  $("yearSel").innerHTML = D.years.map(y => `<option value="${y}"${y === D.national_year ? " selected" : ""}>${y} 年</option>`).join("");
+  $("yearSel2").innerHTML = $("yearSel").innerHTML;
+  $("standardsBody").innerHTML = D.gbt.map(c =>
+    `<div class="std-cat"><div class="nm">${c.code}. ${c.name}</div>
+     <div class="ex">${c.examples.join("、")}</div><div class="nt">${c.note}</div></div>`).join("");
+  initEnt();
+  renderRegion("CN");
+  renderEnt();
+  addMsg("你好，我是废纸回收助手 🪨（离线版，不联网）。\n"
+    + "可以问我：能不能回收、值多少钱、各省回收量、历年趋势、八大类分类、某省有哪些企业。\n"
+    + "右侧四个标签页：区域统计 / 历年数据 / 分类结构 / 企业分布。", "bot");
+})();
+</script>
+</body>
+</html>

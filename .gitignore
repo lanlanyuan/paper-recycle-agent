@@ -6,7 +6,10 @@ __pycache__/
 
 # Distribution / packaging
 build/
-dist/
+# dist/ 是构建产物，但离线单文件版要进仓库：
+# 它的意义就是「不装任何东西也能双击打开」，如果还得先装 Python 来生成它，就自相矛盾了。
+dist/*
+!dist/paper-recycle-offline.html
 
 # Virtual environments
 .venv/
