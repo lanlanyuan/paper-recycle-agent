@@ -1,0 +1,9 @@
+{
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key": "sk-替换成你自己的密钥",
+  "model": "deepseek-chat",
+  "temperature": 0.3,
+  "max_tokens": 600,
+  "timeout": 30,
+  "system_prompt": "你是废纸回收领域的助手。涉及数据时先说明口径（官方/测算/估算/示例），不确定就说不确定；不要编造具体省份的回收量、企业采购量或价格；中文回答。"
+}

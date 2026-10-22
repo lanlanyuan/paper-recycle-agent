@@ -282,3 +282,201 @@ GBK 在中文系统上能用，但系统一旦开了「Beta: 使用 Unicode UTF-
 
 顺带把 `test_exporter.py` 改成 `importorskip`——没装 openpyxl 的机器上应该跳过这组测试，
 而不是让整个套件在 collection 阶段就崩掉。
+
+---
+
+### 2026-10-23 · 投入产出、地图、模型配置、麦克风自检（PR #19, closes #26 #27 #28 #29）
+
+需求原话是：「依据中国投入产出表、各省份投入产出表和各企业投入产出表去统计全国各省各城市
+各造纸企业的消耗金额量情况，并且引入正版的中国地图做显示。你需要做一个模型配置模块可以
+接入 API 进行思考，并且检查好麦克风是否能收音输入文字。」
+
+四件事，其中第一件在动手前就撞上了事实问题。
+
+#### 一、「各企业投入产出表」这个东西不存在
+
+先查证，再写代码。投入产出表（Input-Output Table）是**国民经济核算工具**，编制主体是国家
+或地区统计局，用于刻画产业部门之间的中间投入与最终使用关系。企业的法定报表是资产负债表、
+利润表、现金流量表，**没有任何一家企业会编制投入产出表**，也不存在这样的公开数据集。
+
+同样地，国家统计局在公开咨询答复中明确：**目前地级市暂不编制投入产出表**，投入产出表只到
+国家与省级两个层级。
+
+所以原始需求里的四级（国 / 省 / 市 / 企业）在「投入产出」这个口径下，实际可得的只有两级。
+如果硬凑四级，唯一的做法是编数字。这和 v1.3.0 下线市县数据是同一道题——那次选择了「减法」，
+这次也一样：
+
+```python
+LEVELS = [
+    {"key": "national",   "io_available": True,  "provenance": "官方", ...},
+    {"key": "province",   "io_available": True,  "provenance": "官方（表）+ 估算（分摊）", ...},
+    {"key": "city",       "io_available": False, "provenance": "估算",
+     "note": "国家统计局：地级市暂不编制投入产出表。按企业名录城市分布分摊"},
+    {"key": "enterprise", "io_available": False, "provenance": "示例",
+     "note": "企业无投入产出表（只有财务报表）。按年经手量 × 市场均价估算采购金额"},
+]
+```
+
+`io_available` 这个布尔字段是给前端和 Excel 用的：**能查到官方表就标官方，查不到就明说查不到**，
+而不是含糊地给一个数字。
+
+#### 二、金额是「下限」，所以字段名带 is_lower_bound
+
+废纸消耗金额 = 消耗量 × 加权参考价。难点在价格：知识库里的 888.5 元/吨是**居民/回收站口径**
+的回收参考价，纸厂到厂价还要加上分拣、打包、运输，通常更高。
+
+最省事的做法是乘一个「加价系数 1.2」之类的，但那是一个没有任何出处的假设，比不给更糟。
+最终选择：**不乘系数**，把结果标成下限。
+
+```python
+return {
+    "amount": round(t * p / 10000, 1),   # 亿元
+    "is_lower_bound": True,
+    "note": "按回收参考价计价，是纸厂废纸成本的下限（不含分拣打包运输）",
+}
+```
+
+界面、Excel「投入产出」表、文档三处都写同一句话。测试里专门有一条守着它：
+`test_spend_is_labelled_lower_bound`。
+
+#### 三、不内置投入产出矩阵，但把算法做对
+
+`data/io_matrix.csv` 是空的，`.gitignore` 也把它排除了。理由写在代码注释里：
+
+> 本仓库不内置任何投入产出矩阵：编一张看起来权威的假矩阵，比不提供更糟。
+
+但算法要真能用。`leontief_inverse()` 用**纯标准库**实现带部分主元的高斯-约当消元求
+`(I - A)^-1`，不引入 numpy——这个仓库的基调就是零运行时依赖：
+
+```python
+# 构造 [I - A | I]，逐列选主元、归一化、消元
+for col in range(n):
+    pivot = max(range(col, n), key=lambda r: abs(aug[r][col]))
+    if abs(aug[pivot][col]) < 1e-12:
+        raise ValueError("矩阵奇异：第 %d 列无法消元…" % (col + 1))
+    ...
+```
+
+正确性用教科书例子验证：`A = [[0.2, 0.3], [0.4, 0.1]]` → `(I-A)^-1 = [[1.5, 0.5], [2/3, 4/3]]`。
+另有 `test_leontief_inverse_rejects_singular` 确认奇异矩阵会报错而不是返回垃圾。
+影响力系数与感应度系数的均值都应为 1，也各有一条测试。
+
+用户要做的只有一步：把国家统计局 42 部门表导成 CSV，放到 `data/io_matrix.csv`。
+`data/io_matrix.csv.example` 给了格式样例。
+
+#### 四、地图：只用正版底图，而且不内置 key
+
+这一块有合规红线：中国地图的国界线、台湾岛、南海诸岛画法有明确规定，**不能自己用 SVG
+画一个「大致形状」**。可用的只有持牌地图服务商（腾讯 / 高德 / 百度 / 天地图）。
+
+于是 `/api/map/config` 从环境变量 `TMAP_KEY` 读 key，代码里不写任何可用 key，
+只留一句显式占位符：
+
+```python
+key_placeholder = "Please apply for your own key at the Tencent Map Open Platform and replace this placeholder"
+```
+
+没 key 的时候前端**降级而不是报错**：不画地图，改成省份排行条形榜，并给出申请链接。
+
+```
+未配置地图密钥，已降级为下方的省份排行…
+```
+
+这个降级路径有测试盯着（`test_map_config_without_key_degrades`），因为「没配置就白屏」
+是最容易被忽略的体验缺陷。
+
+气泡大小按金额等比缩放（`bubbleIcon()`），坐标用 GCJ-02——腾讯地图的坐标系，
+用 WGS-84 会整体偏移几百米，虽然在全国尺度看不出来，但这是个不该犯的错。
+
+#### 五、模型配置：让 agent 真能「思考」，但没配置时不能瘫
+
+`llm.py` 走 OpenAI 兼容协议 `/chat/completions`，用 `urllib.request` 实现，零第三方依赖。
+支持 6 个预设：OpenAI / DeepSeek / 通义千问 / 智谱 GLM / Kimi / 本地 Ollama。
+
+两个细节值得记：
+
+**1. 密钥永远不出现在响应里。** `public()` 只返回 `mask_key()` 后的 `sk-…3f9a`。
+`save_config(api_key=None)` 表示「不改密钥」，避免用户只想改模型名却把密钥清空。
+报错信息也要脱敏——`_scrub()` 会在抛出前把文本里出现的密钥替换掉，否则某些服务端
+会把 key 回显在错误体里，直接泄露到前端。
+
+**2. 没配置时必须回落，而不是报错。** `/api/llm/chat` 在 `configured() == False` 时
+直接走原来的规则引擎 `respond()`，并在响应里带一句 `llm_error` 说明原因：
+
+```json
+{"engine": "rule", "llm_error": "未配置模型 API：请在「设置」里填写…"}
+```
+
+这样「装了就能用大模型，不装也能用」——而不是装完发现不填 key 连话都不能说。
+
+系统提示词里明确写了「以下数据口径以此为准，不要自行编造数字」，并把全国回收量、
+回收率、货值一起塞进上下文。测试 `test_system_prompt_forbids_fabrication` 守着这句话。
+
+#### 六、麦克风：不能只看权限，要看波形
+
+之前 v1.4 的语音输入只判断了 `getUserMedia` 是否抛异常，于是出现「权限给了、按钮亮了、
+说话没反应」的情况——设备存在但录不到声音（静音、选错设备、系统级禁用）。
+
+这次改成**真读音频流算能量**：
+
+```javascript
+const tick = () => {
+  analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) { const v = (buf[i]-128)/128; sum += v*v; }
+  const rms = Math.sqrt(sum / buf.length);
+  if (rms > peak) peak = rms;
+  meter.style.width = Math.min(100, rms * 400).toFixed(0) + "%";
+  if (Date.now() - started < 3000) micRAF = requestAnimationFrame(tick); else finish();
+};
+```
+
+录 3 秒，取 RMS 峰值，分三档给结论：**<1% 几乎无声**（提示检查静音/换设备）、
+**1–5% 声音太弱**（提示靠近麦克风）、**>5% 正常**。同时列出所有输入设备让用户自己选，
+并检查 `window.isSecureContext`——`http://` 非 localhost 环境下浏览器根本不给麦克风权限，
+这是最常见的「点了没反应」原因，直接在界面上写出来。
+
+#### 七、踩到的坑
+
+- **`%` 格式化被中文全角逗号打断**：`"…货值约 %.1f 亿元（按回收参考价，属下限）。"` 直接抛
+  `ValueError: unsupported format character '?' (0xff0c)`——全角逗号被当成格式符。
+  改用 `.format()`，且数字全部从模块取，不写死。
+- **`enterprise_spend()` 引用了不存在的字段**：企业记录只有 `province_code`，没有
+  `province_name`。改成 `regions.get_node(str(e["province_code"]))["name"]`。
+- **浮点断言过严**：`direct_coefficient` 实现里 `round(..., 4)` 得 0.0428，未 round 是
+  0.04278082…，断言 1e-6 必挂。改成拿 `round()` 后的值直接比。
+- **前端假 DOM 缺全局**：补了 `URLSearchParams`，以及 `/api/stats`、`/api/enterprises`、
+  `/api/info` 三个桩，否则测试里 `Cannot read properties of undefined`。
+
+#### 八、验证方式
+
+不只看 pytest 绿灯：
+
+| 检查 | 手段 | 结果 |
+| --- | --- | --- |
+| 单元测试 | `pytest -q` | 111 → **158 passed** |
+| 版本兼容 | `tools/check_compat.py` | 语法 / 运行时 API / 注解三项 OK |
+| JS 语法 | `node --check` | 通过 |
+| 前端逻辑 | 假 DOM + `node:vm` | 11 项检查全通过 |
+| 离线版 | 假 DOM 跑 7 项 | 全通过 |
+| Excel 结构 | 实际导出后读表名与单元格 | 7 张表，数值逐项核对 |
+| 无 key 降级 | 直接请求接口 | 返回 `engine=rule` + 可读原因 |
+
+Excel 导出实测：
+
+```
+['省级统计', '分类回收', '历年回收', '废纸进口', '企业名录', '投入产出', '数据说明']
+投入产出表 78 行 · 消耗量 7030 万吨 · 加权价 888.5 元/吨 · 货值 624.6 亿元
+直接消耗系数 4.28% · 单位产值消耗 0.482 吨/万元
+```
+
+#### 测试
+
+111 → 158 项。新增 `tests/test_io_table.py`（30 项）与 `tests/test_llm.py`（17 项）。
+几条防呆的：
+
+- `test_no_builtin_matrix_shipped` —— 断言 `data/io_matrix.csv` 不存在，防止哪天有人
+  「顺手」塞一张假矩阵进仓库；
+- `test_public_config_never_leaks_key` —— 遍历 `public()` 的所有字段，确认没有明文密钥；
+- `test_chat_http_error_is_readable_and_scrubbed` —— 401 的报错文本里不能出现 key；
+- `test_spend_matches_category_sum` —— 两条算金额的路径（总量 × 均价 / 分类加总）必须一致。

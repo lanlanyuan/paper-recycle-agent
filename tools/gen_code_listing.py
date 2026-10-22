@@ -45,6 +45,8 @@ ROOT_FILES = [
     "pyproject.toml",
     "requirements.txt",
     "data/enterprises.csv.example",
+    "data/io_matrix.csv.example",
+    "config/llm.json.example",
     ".github/workflows/ci.yml",
 ]
 

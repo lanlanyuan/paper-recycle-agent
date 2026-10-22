@@ -10,6 +10,9 @@ _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
 _HELP = {"帮助", "help", "怎么用", "功能", "能做什么", "用法"}
 # 历年趋势类
 _HISTORY = {"历年", "年份", "以前", "过去", "趋势", "增长", "变化", "这几年", "近五年", "历史数据"}
+# 投入产出 / 消耗金额类（必须放在区域与估价之前，否则「金额」会被当成卖废品估价）
+_IO = {"投入产出", "消耗金额", "采购金额", "消耗系数", "货值", "产值消耗",
+       "消耗了多少钱", "花了多少钱", "投入产出表"}
 # 按类别拆分回收量类
 _CATEGORY_STATS = {"分类数据", "分类回收", "类别占比", "各类回收", "八大类", "按类别", "分类占比", "品种结构"}
 # 年鉴 / 标准 / 分类定义类
@@ -53,10 +56,29 @@ def respond(user_input: str) -> str:
     if low in _GREETING:
         return (
             "你好，我是废纸回收助手 🪨。可以问我：废纸是否可回收、估算回收价值、"
-            "全国/各省回收统计、历年趋势、八大类分类回收量。输入「帮助」查看用法。"
+            "全国/各省回收统计、历年趋势、八大类分类回收量、废纸消耗金额。输入「帮助」查看用法。"
         )
     if any(k in text for k in _HELP):
         return _help_text()
+
+    # 投入产出：消耗金额 / 直接消耗系数
+    if any(k in text for k in _IO):
+        from . import io_table
+
+        year = _extract_year(text) or int(io_table.NATIONAL_IO["year"])
+        node = regions.find(text)
+        if node is not None and node["level"] == "province":
+            share = float(node["stats"]["占全国比重(%)"]) / 100.0  # type: ignore[index]
+            total = float(io_table.spend(year)["amount"]) * share
+            dc = io_table.direct_coefficient(year)
+            coef = "—" if dc["coefficient"] is None else f"{dc['coefficient_pct']}%"
+            return (
+                f"{node['name']}{year} 年废纸消耗金额约 {total:.1f} 亿元"
+                f"（按该省回收量占全国 {share * 100:.2f}% 分摊，属估算，非实际采购分布）。\n"
+                f"全国同口径 {io_table.spend(year)['amount']} 亿元，"
+                f"直接消耗系数 {coef}（按回收参考价计，属纸厂成本下限）。"
+            )
+        return io_table.summary_text(year)
 
     # 按类别拆分回收量
     if any(k in text for k in _CATEGORY_STATS):
@@ -126,6 +148,7 @@ def _help_text() -> str:
             "5) 看历年趋势：输入「历年数据」「近五年趋势」。",
             "6) 看区域统计（仅全国与省级）：输入「山东省回收量」「全国统计」「排名」。",
             "7) 看企业分布：输入「企业名录」「山东有哪些回收企业」「分拣中心」。",
-            "8) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、说明六张表。",
+            "8) 看消耗金额（投入产出）：输入「废纸消耗金额」「投入产出」「直接消耗系数」。",
+            "9) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、投入产出、说明七张表。",
         ]
     )

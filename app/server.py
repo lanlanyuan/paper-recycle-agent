@@ -5,12 +5,21 @@
   GET  /api/info         -> {categories, quality, sources, years, national_year}
   GET  /api/regions      -> 区域树（全国 → 省）
   GET  /api/stats        -> 区域统计 + 历年序列 + 分类拆分（?code=CN&year=2024）
+  GET  /api/enterprises  -> 企业名录与按省/类/型汇总
+  GET  /api/io           -> 投入产出：消耗金额、直接消耗系数、分省/分市/分企业（?year=&code=）
+  GET  /api/map/config   -> 地图接入配置（供应商、key 占位符、审图号说明）
+  GET  /api/map/data     -> 省级消耗金额 + 中心点坐标（供地图打点）
+  GET  /api/llm/config   -> 模型配置状态（密钥脱敏）
+  POST /api/llm/config   -> 保存模型配置
+  POST /api/llm/test     -> 连通性探测
+  POST /api/llm/chat     -> 走大模型回答（未配置时回落规则引擎）
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
-  POST /chat             -> {"reply": "..."}
+  POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
 """
 
 import io
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -21,7 +30,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import enterprises, exporter, regions, respond
+from paper_recycle_agent import (enterprises, exporter, io_table, llm, regions,
+                                 respond)
 from paper_recycle_agent import stats as stats_mod
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -156,6 +166,188 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
         "history": _scoped_history(node_code),
         "categories": stats_mod.category_breakdown(year, total=base),
         "import_series": stats_mod.get_import_series(),
+    }
+
+
+@app.get("/api/io")
+def io_overview(year: Optional[int] = None, code: Optional[str] = None) -> dict:
+    """投入产出视角：消耗金额、直接消耗系数、分省 / 分市 / 分企业。"""
+    if year is None:
+        year = io_table.NATIONAL_IO["year"]  # type: ignore[assignment]
+    year = int(year)
+    valid = {int(r["year"]) for r in stats_mod.get_history()}
+    if year not in valid:
+        year = max(valid)
+
+    data = io_table.overview(year)
+    # 选中某省时，附带该省的城市分摊
+    node = regions.get_node(code) if code else None
+    if node is not None and node["level"] == "province":
+        data["cities"] = io_table.city_spend(str(node["code"]), year)
+        data["scope"] = node["name"]
+    else:
+        data["cities"] = None
+        data["scope"] = "全国"
+    return data
+
+
+# 地图：合规要求只能用腾讯 / 高德 / 百度 / 天地图，且不得内置可用密钥。
+# 这里只提供「接入说明 + 占位符」，真实 key 由用户在设置里填。
+_MAP_PLACEHOLDER = (
+    "Please apply for your own key at the Tencent Location Service Open Platform "
+    "and replace this placeholder"
+)
+_MAP_ATTRIBUTION = (
+    "底图由腾讯位置服务提供（已取得测绘资质与审图号），"
+    "本工具仅在其上叠加统计数据，不自行绘制任何国界或行政区划界线。"
+)
+
+
+@app.get("/api/map/config")
+def map_config() -> dict:
+    """地图接入配置。密钥优先取环境变量，其次由前端在设置里填写。"""
+    env_key = os.environ.get("TMAP_KEY", "").strip()
+    return {
+        "provider": "tencent",
+        "sdk_url": "https://map.qq.com/api/gljs?v=1.exp",
+        "key": env_key,
+        "key_source": "env" if env_key else "none",
+        "key_placeholder": _MAP_PLACEHOLDER,
+        "apply_url": "https://lbs.qq.com/dev/console/application/mine",
+        "attribution": _MAP_ATTRIBUTION,
+        "fallback": "未配置密钥时，地图页降级为「省份消耗金额排行」，不绘制任何边界。",
+    }
+
+
+@app.get("/api/map/data")
+def map_data(year: Optional[int] = None) -> dict:
+    """省级消耗金额 + 中心点坐标（GCJ-02），供地图打点使用。"""
+    if year is None:
+        year = io_table.NATIONAL_IO["year"]  # type: ignore[assignment]
+    year = int(year)
+    rows = io_table.province_spend(year)["rows"]
+    max_amount = max((float(r["amount"]) for r in rows), default=0.0)
+
+    points = []
+    for r in rows:
+        centroid = enterprises.PROVINCE_CENTROID.get(str(r["code"]))
+        if not centroid:
+            continue
+        amount = float(r["amount"])
+        points.append({
+            "code": r["code"],
+            "name": r["name"],
+            "amount": amount,
+            "share_pct": r["share_pct"],
+            "rank": r["rank"],
+            # 归一化半径，供前端画圆
+            "ratio": round(amount / max_amount, 4) if max_amount else 0.0,
+            "lat": centroid[0],
+            "lon": centroid[1],
+            "provenance": r["provenance"],
+        })
+
+    return {
+        "year": year,
+        "unit": "亿元",
+        "points": points,
+        "max_amount": round(max_amount, 1),
+        "coordinate_system": "GCJ-02",
+        "attribution": _MAP_ATTRIBUTION,
+        "note": "省份坐标取省会近似位置，仅用于打点示意，不代表实际厂址。",
+    }
+
+
+class LLMConfigReq(BaseModel):
+    base_url: str = ""
+    api_key: Optional[str] = None
+    model: str = ""
+    temperature: float = 0.3
+    max_tokens: int = 600
+    timeout: float = 30.0
+    system_prompt: Optional[str] = None
+
+
+class LLMChatReq(BaseModel):
+    message: str
+
+
+@app.get("/api/llm/config")
+def llm_config() -> dict:
+    """模型配置状态。密钥只返回脱敏值。"""
+    return llm.status()
+
+
+@app.post("/api/llm/config")
+def llm_config_save(req: LLMConfigReq) -> dict:
+    cfg = llm.save_config(
+        base_url=req.base_url,
+        api_key=req.api_key,
+        model=req.model,
+        temperature=req.temperature,
+        max_tokens=req.max_tokens,
+        timeout=req.timeout,
+        system_prompt=req.system_prompt,
+    )
+    return {"ok": True, "config": cfg.public()}
+
+
+@app.post("/api/llm/config/clear")
+def llm_config_clear() -> dict:
+    removed = llm.clear_config()
+    return {"ok": True, "removed": removed, "config": llm.load_config().public()}
+
+
+@app.post("/api/llm/test")
+def llm_test() -> dict:
+    """连通性探测：能通返回 ok=True 与延迟。"""
+    return llm.probe()
+
+
+@app.post("/api/llm/chat")
+def llm_chat(req: LLMChatReq) -> dict:
+    """走大模型回答；未配置或调用失败时回落到规则引擎，并说明原因。"""
+    message = (req.message or "").strip()
+    if not message:
+        return {"ok": False, "reply": "请输入内容。", "engine": "none"}
+
+    # 把当前数据上下文喂给模型，减少胡编（数字全部取自模块，避免写死后过期）
+    io_nat = io_table.NATIONAL_IO
+    context = (
+        "以下是本工具的数据口径，回答时以此为准，不要自行编造数字："
+        "2024 年全国废纸回收量 {rec} 万吨，回收率 {rr}%，利用率 {ut}%；"
+        "造纸和纸制品业营业收入 {rev} 亿元；"
+        "废纸货值约 {amt} 亿元（按回收参考价计价，是纸厂废纸成本的下限，非到厂采购额）。"
+        "省级回收量为「公开报道 + 梯队测算」，分类回收量为估算，企业名录为示例数据。"
+    ).format(
+        rec=io_nat["wastepaper_recovery"],
+        rr=io_nat["recovery_rate"],
+        ut=io_nat["utilization"],
+        rev=io_nat["paper_revenue"],
+        amt=io_table.spend(2024)["amount"],
+    )
+    result = llm.chat([
+        {"role": "system", "content": context},
+        {"role": "user", "content": message},
+    ])
+    if result["ok"]:
+        return {
+            "ok": True,
+            "engine": "llm",
+            "model": result["model"],
+            "latency_ms": result["latency_ms"],
+            "reply": result["reply"],
+        }
+
+    # 回落：规则引擎永远可用
+    fallback = respond(message)
+    return {
+        "ok": True,
+        "engine": "rule",
+        "model": result.get("model", ""),
+        "latency_ms": result.get("latency_ms", 0),
+        "reply": fallback,
+        "llm_error": result.get("error", ""),
     }
 
 

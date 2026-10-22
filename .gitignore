@@ -20,6 +20,13 @@ env/
 .pytest_cache/
 .coverage
 
+# 模型 API 配置：含明文密钥，绝不入库
+config/llm.json
+# 用户导入的真实投入产出表（版权数据，不入库）
+data/io_matrix.csv
+# 本地企业名录（真实数据，不入库；模板是 enterprises.csv.example）
+data/enterprises.csv
+
 # Editor / OS
 .idea/
 .vscode/

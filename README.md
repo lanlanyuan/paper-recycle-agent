@@ -10,8 +10,8 @@
 
 | 方式 | 怎么用 | 需要什么 | 能力 |
 | --- | --- | --- | --- |
-| **① 离线单文件**（最稳） | 双击 `dist/paper-recycle-offline.html` | 只要浏览器 | 对话、四个标签页、CSV 导出 |
-| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能，含六表 xlsx 导出、语音输入 |
+| **① 离线单文件**（最稳） | 双击 `dist/paper-recycle-offline.html` | 只要浏览器 | 对话、五个标签页（含投入产出）、CSV 导出 |
+| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能：七张表 xlsx、消耗地图、模型配置、麦克风自检 |
 | **③ 在线版** | 打开分享链接 | 能访问外网 | 同 ② |
 
 > 打不开线上链接时，先用 ① —— 它是单个 HTML 文件，数据全部内联，不联网、不起服务、双击即开。
@@ -65,13 +65,17 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 - 关键词分类引擎，多命中智能排序
 - 重量 × 单价回收估价，支持「斤」折算
 - 自然语言对话（问候 / 帮助 / 估价 / 分类）
-- 命令行 `chat` / `classify` / `price` / `categories` / `info` / `history` / `catstats` / `region` / `enterprises` / `export`
+- 命令行 `chat` / `classify` / `price` / `categories` / `info` / `history` / `catstats` / `io` / `region` / `enterprises` / `export`
 - **接入《中国造纸年鉴》废纸分类（GB/T 20811-2018，8 大类 42 小类）与 2024 行业数据**
 - **全国 + 省级两级区域统计**（不再提供市/县数据，见下方「数据口径」）
 - **历年数据 2014—2025**：回收量、回收率、利用率、废纸进口量
 - **按八大类拆分的分类回收量**（占比 × 回收量，含参考价与估算货值）
 - **企业维度：企业名录 + 地理位置 + 主营品类 + 年回收量**（可按省 / 大类 / 类型筛选，含地理分布示意图）
-- **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 企业 / 数据说明 六张表）
+- **投入产出视角：废纸消耗金额、直接消耗系数、单位产值消耗**（全国 / 省 / 市 / 企业四级，每级标注口径）
+- **正版底图消耗地图**（腾讯位置服务 GL JS，按省级消耗金额打点；无密钥时降级为排行，不画任何边界）
+- **模型配置模块**：接入任意 OpenAI 兼容 API（OpenAI / DeepSeek / 通义 / 智谱 / Kimi / 本地 Ollama），未配置时自动回落规则引擎
+- **麦克风自检**：真实读取音频流算 RMS，判断「能不能收音」而不只是「有没有权限」
+- **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 企业 / 投入产出 / 数据说明 七张表）
 - **对话支持语音输入**（浏览器 Web Speech API，失败时在输入框下方显示具体原因）
 - **Web 图形界面**：FastAPI 聊天页 + 区域/历年/分类/企业 四个标签页
 - **核心零依赖、Python 3.7 起可用**；openpyxl 为可选依赖，缺失时导出接口返回 503 并给出安装提示
@@ -86,8 +90,66 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 | 历年 2014—2025 | 官方 | 中国造纸协会年度报告、《中国造纸》统计表；2025 为初步核算 |
 | 八大类占比 | 估算 | 官方未逐类公布回收量，按 2015/2020/2025 三锚点插值 |
 | 企业名录 | 示例 | 内置 30 家示例企业（虚构名称），放 `data/enterprises.csv` 即切换为真实名录 |
+| 投入产出（全国） | 官方 | 国家统计局全国投入产出表（42 部门）+ 中国造纸协会 2024 年报（营收 1.46 万亿元） |
+| 投入产出（省级） | 官方表 + 估算分摊 | 各省均编制本地区投入产出表；本工具的分省金额按回收量占比分摊，**非实际采购分布** |
+| 投入产出（地级市） | 估算 | 国家统计局明确「地级市暂不编制投入产出表」，按企业名录城市分布分摊 |
+| 投入产出（企业） | 示例 | **不存在「企业投入产出表」**，只有财务报表；金额 = 年经手量 × 市场均价 |
+
+### 投入产出的金额是怎么算的
+
+```
+消耗金额(亿元) = Σ(分类消耗量(万吨) × 回收参考价(元/公斤) × 0.1)
+直接消耗系数   = 消耗金额 ÷ 造纸和纸制品业营业收入
+单位产值消耗   = 消耗量(万吨) ÷ 营业收入(亿元) = 吨/万元
+```
+
+参考价是**居民 / 回收站口径**，不含分拣、打包、运输，所以这个金额是**纸厂废纸成本的下限**，
+不是到厂采购额。本工具不额外乘一个加价系数——那会引入没有依据的假设，宁可给下限并写明。
+
+`io_table.py` 里实现了 Leontief 逆矩阵、影响力系数、感应度系数（纯标准库高斯消元），
+但**仓库不内置任何投入产出矩阵**：编一张看起来权威的假矩阵比不提供更糟。
+要用完整模型，请从国家统计局 42 部门表导出 CSV，格式见 `data/io_matrix.csv.example`。
 
 **为什么不提供市、县数据**：市级、县级废纸回收量没有公开的权威逐级统计。早期版本用权重分摊"造"出了市县数据，容易让使用者误以为是真实统计，v1.3.0 起已下线，只保留可核验的两级。替换真实数据的方法见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
+
+> 投入产出的层级与这个逻辑一致：国家统计局在咨询公开里明确「**目前地级市暂不编制投入产出表**」，
+> 企业更是只有财务报表、没有投入产出表。所以这两级的金额一律标「估算 / 示例」，不当官方数据用。
+
+## 地图：为什么默认没有底图
+
+地图只能使用**具备测绘资质的正版底图**（腾讯位置服务 / 高德 / 百度 / 天地图）。
+本仓库**不内置任何可用密钥**——内置的 key 一旦推到 GitHub 就等于泄露。
+
+所以默认行为是：
+
+| 情况 | 表现 |
+| --- | --- |
+| 没配置地图 key | 地图页降级为「省份消耗金额排行」，**不绘制任何边界** |
+| 在「设置 → 地图 Key」填了 key | 加载腾讯地图 GL JS 正版底图，按省级金额打点（点大小 = 金额量级） |
+| key 无效 / Referer 不匹配 | 提示具体原因并降级为排行 |
+
+申请免费 key：<https://lbs.qq.com/dev/console/application/mine>（选 Web 端，配置 Referer 白名单）。
+
+> 为什么不用开源 GeoJSON 自己画中国地图：自行绘制国界极易出错，而国界、台湾、南海诸岛
+> 的绘制有明确的合规红线。用正版底图，边界由持牌方负责；我们只叠加统计数据。
+
+## 模型配置：怎么接 API 思考
+
+「设置」页可以填 Base URL / 模型名 / API Key，保存到服务端 `config/llm.json`（已 gitignore）。
+接口只返回脱敏密钥（`sk-…3f9a`），报错信息也会先把密钥替换掉。
+
+```bash
+# 或者用环境变量（优先级高于配置文件，适合 CI / 服务器）
+export PAPER_LLM_BASE_URL=https://api.deepseek.com/v1
+export PAPER_LLM_API_KEY=sk-xxx
+export PAPER_LLM_MODEL=deepseek-chat
+```
+
+内置预设：OpenAI / DeepSeek / 通义千问（DashScope 兼容模式）/ 智谱 GLM / Kimi / 本地 Ollama。
+**没配置也能用**：对话自动回落到 `agent.py` 的规则引擎，工具不会因为缺 key 而不可用。
+
+安全提醒：`config/llm.json` 是明文密钥。本机自用没问题；若把服务暴露到公网，请自行加鉴权，
+或改用只读环境变量方式。
 
 ## 快速开始
 ```bash
@@ -95,6 +157,7 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 PYTHONPATH=src python -m paper_recycle_agent.cli history
 PYTHONPATH=src python -m paper_recycle_agent.cli catstats 2024
 PYTHONPATH=src python -m paper_recycle_agent.cli region 山东
+PYTHONPATH=src python -m paper_recycle_agent.cli io 2024      # 消耗金额 + 直接消耗系数
 
 # 需要 xlsx 导出 / 图形界面
 pip install -r requirements.txt   # fastapi + uvicorn + openpyxl + pytest
@@ -111,16 +174,20 @@ paper-recycle-agent/
 │   ├── stats.py               # 历年序列 + 八大类占比与分类回收量
 │   ├── regions.py             # 全国 + 省级两级统计
 │   ├── enterprises.py         # 企业名录（地理坐标 / 类型 / 主营品类 / 年回收量）
+│   ├── io_table.py            # 投入产出：消耗金额、直接消耗系数、Leontief 逆矩阵
+│   ├── llm.py                 # 模型配置：OpenAI 兼容 API、密钥脱敏、连通性探测
 │   ├── exporter.py            # 多表 Excel 导出（openpyxl，按需导入）
 │   ├── classifier.py          # 分类引擎
 │   ├── pricing.py             # 估价
 │   ├── agent.py               # 对话引擎
 │   └── cli.py                 # 命令行
-├── data/enterprises.csv.example  # 企业名录模板（复制为 enterprises.csv 即启用真实数据）
-├── tests/                     # pytest 单元测试（111 项）
-├── tools/                     # 代码清单生成 / 离线版构建 / Python 3.7 兼容性校验
-├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出）
-├── app/static/index.html      # 聊天界面（区域 / 历年 / 分类 / 企业 四标签页）
+├── config/llm.json.example    # 模型配置模板（复制为 llm.json，已被 gitignore）
+├── data/enterprises.csv.example  # 企业名录模板
+├── data/io_matrix.csv.example    # 投入产出矩阵导入格式（仅格式示例，非真实数据）
+├── tests/                     # pytest 单元测试（158 项）
+├── tools/                     # 代码清单 / 离线版构建 / Python 3.7 兼容性校验
+├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出 + 模型代理）
+├── app/static/index.html      # 界面（区域 / 历年 / 分类 / 企业 / 投入产出 / 地图 / 设置）
 ├── run.py                     # 读取 PORT 的统一启动入口
 ├── 启动本地版.bat              # 一键启动（纯 ASCII，避免 cmd 按 GBK 解析中文出错）
 ├── docs/                      # 使用/贡献/开发日志/代码清单/数据来源

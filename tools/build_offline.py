@@ -16,7 +16,7 @@ from pathlib import Path
 
 import paper_recycle_agent
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import enterprises, knowledge, regions
+from paper_recycle_agent import enterprises, io_table, knowledge, regions
 from paper_recycle_agent import stats as stats_mod
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,6 +70,13 @@ def build_payload() -> dict:
         "gbt": yearbook.CATEGORIES_8,
         "quality_rules": yearbook.QUALITY_RULES,
         "sources": yearbook.SOURCES + stats_mod.SOURCES,
+        "io": {
+            "spend": io_table.spend(io_table.NATIONAL_IO["year"]),
+            "direct": io_table.direct_coefficient(io_table.NATIONAL_IO["year"]),
+            "unit": io_table.unit_consumption(io_table.NATIONAL_IO["year"]),
+            "provinces": io_table.province_spend(io_table.NATIONAL_IO["year"]),
+            "levels": io_table.LEVELS,
+        },
     }
 
 
@@ -124,6 +131,12 @@ TEMPLATE = r"""<!DOCTYPE html>
   .sect-title{font-size:13px;font-weight:600;margin:14px 0 6px;display:flex;justify-content:space-between;gap:8px}
   .sect-title .hintline{font-size:10.5px;font-weight:400;color:var(--muted)}
   .scroll{max-height:268px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .kpi{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:#fbfcfd}
+  .kpi .k{font-size:11px;color:var(--muted)}
+  .kpi .v{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  .kpi .v .u{font-size:11px;font-weight:400;color:var(--muted);margin-left:3px}
+  .kpi .n{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45}
   table{width:100%;border-collapse:collapse;font-size:12px}
   th,td{border-bottom:1px solid var(--border);padding:5px 6px;text-align:left;white-space:nowrap}
   th{background:var(--brand-soft);color:var(--brand);font-weight:600;position:sticky;top:0;z-index:1}
@@ -178,6 +191,7 @@ TEMPLATE = r"""<!DOCTYPE html>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
+      <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
     </div>
 
     <section class="pane active" id="pane-region">
@@ -240,6 +254,22 @@ TEMPLATE = r"""<!DOCTYPE html>
         <th>企业</th><th>城市</th><th>类型</th><th class="num">年回收量(万吨)</th><th>主营</th>
         </tr></thead><tbody></tbody></table></div>
     </section>
+
+    <section class="pane" id="pane-io">
+      <div class="kpis" id="ioKpis"></div>
+      <div class="notice" id="ioNotice"></div>
+      <div class="sect-title"><span>分省消耗金额（亿元）</span>
+        <span class="hintline">按回收量占比分摊</span></div>
+      <div class="scroll" style="max-height:300px"><table id="ioTable"><thead><tr>
+        <th class="num">#</th><th>省份</th><th class="num">占比(%)</th>
+        <th class="num">金额(亿元)</th><th>口径</th>
+        </tr></thead><tbody></tbody></table></div>
+      <div class="notice" style="margin-top:8px">
+        <b>地图</b>与<b>模型配置</b>需要本地服务版：双击「启动本地版.bat」后访问
+        <code>http://localhost:8000</code>。离线版不含这两项（地图需正版底图密钥，
+        模型配置需服务端保存密钥）。
+      </div>
+    </section>
   </aside>
 </div>
 
@@ -266,6 +296,41 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.pane === name));
   document.querySelectorAll(".pane").forEach(p => p.classList.toggle("active", p.id === "pane-" + name));
   if (name === "enterprise") renderEnt();
+  if (name === "io") renderIO();
+}
+
+/* ---------- 投入产出 ---------- */
+function ioNum(n, d) {
+  if (n === null || n === undefined || n === "") return "—";
+  const v = Number(n);
+  if (!isFinite(v)) return "—";
+  return v.toLocaleString("zh-CN", {minimumFractionDigits: d || 0, maximumFractionDigits: d || 0});
+}
+
+function renderIO() {
+  const io = D.io;
+  const s = io.spend, dc = io.direct, uc = io.unit;
+  $("ioKpis").innerHTML = [
+    ["废纸消耗金额", ioNum(s.amount, 1), "亿元", s.provenance + "；按回收参考价计，属纸厂成本下限"],
+    ["直接消耗系数", dc.coefficient === null ? "—" : ioNum(dc.coefficient_pct, 2), "%",
+      dc.coefficient === null ? "该年营收无公开值" : "货值 " + ioNum(dc.spend, 1) + " 亿 ÷ 营收 " + ioNum(dc.revenue, 0) + " 亿"],
+    ["单位产值消耗", uc.value === null ? "—" : ioNum(uc.value, 3), "吨/万元", "消耗量 ÷ 营业收入"],
+    ["加权参考价", ioNum(s.avg_price, 0), "元/吨", "分类结构加权，居民 / 回收站口径"]
+  ].map(([k, v, u, n]) =>
+    '<div class="kpi"><div class="k">' + k + '</div><div class="v">' + v +
+    '<span class="u">' + u + '</span></div><div class="n">' + n + '</div></div>'
+  ).join("");
+
+  $("ioNotice").innerHTML =
+    "<b>口径分级</b>：" + io.levels.map(l =>
+      l.name + "（" + (l.io_available ? "有官方表" : "无官方表") + "，" + l.provenance + "）"
+    ).join("　") +
+    "。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——这两级的金额都是分摊估算。";
+
+  document.querySelector("#ioTable tbody").innerHTML = io.provinces.rows.map(r =>
+    '<tr><td class="num">' + r.rank + '</td><td>' + r.name + '</td><td class="num">' +
+    r.share_pct + '</td><td class="num">' + ioNum(r.amount, 1) + '</td><td>' + r.provenance + '</td></tr>'
+  ).join("");
 }
 
 /* ---------- 区域 ---------- */

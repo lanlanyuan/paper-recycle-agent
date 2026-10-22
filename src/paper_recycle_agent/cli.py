@@ -23,6 +23,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("history", help="历年回收量 / 回收率 / 利用率")
     cs = sub.add_parser("catstats", help="按八大类拆分回收量")
     cs.add_argument("year", type=int, nargs="?", default=stats_mod.LATEST_YEAR)
+    io = sub.add_parser("io", help="投入产出：消耗金额与直接消耗系数")
+    io.add_argument("year", type=int, nargs="?", default=2024)
     en = sub.add_parser("enterprises", help="企业名录（可按省 / 类型筛选）")
     en.add_argument("--province", default=None, help="省名，如 山东")
     en.add_argument("--type", dest="etype", default=None, help="企业类型")
@@ -53,6 +55,10 @@ def main(argv=None) -> int:
         print(stats_mod.history_summary())
     elif args.cmd == "catstats":
         print(stats_mod.category_summary(args.year))
+    elif args.cmd == "io":
+        from . import io_table
+
+        print(io_table.summary_text(args.year))
     elif args.cmd == "enterprises":
         from . import enterprises as ent_mod
 
@@ -75,7 +81,7 @@ def main(argv=None) -> int:
         content = exporter.build_workbook(str(node["code"]), args.year)
         with open(args.out, "wb") as fh:
             fh.write(content)
-        print(f"已导出：{args.out}（{len(content)} 字节，6 张工作表）")
+        print(f"已导出：{args.out}（{len(content)} 字节，7 张工作表）")
     else:
         _chat_loop()
     return 0
