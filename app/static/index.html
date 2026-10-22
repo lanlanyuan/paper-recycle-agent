@@ -52,7 +52,7 @@
   /* ---------- 右：统计面板 ---------- */
   .side { width: 500px; border-left: 1px solid var(--border); background: var(--panel);
           overflow-y: auto; padding: 12px 14px 24px; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
   .tab { padding: 7px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
          border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tab.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
@@ -110,6 +110,42 @@
   .export-msg { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 2px 2px 0; min-height: 15px; }
   .export-msg.err { color: #C0392B; }
 
+  /* ---------- 投入产出 ---------- */
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: #fbfcfd; }
+  .kpi .k { font-size: 11px; color: var(--muted); }
+  .kpi .v { font-size: 19px; font-weight: 700; color: var(--ink); margin-top: 2px;
+            font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .kpi .v .u { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .kpi .n { font-size: 10.5px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+
+  /* ---------- 设置表单 ---------- */
+  .form { display: grid; gap: 7px; }
+  .form label { display: grid; grid-template-columns: 76px 1fr; align-items: center;
+                gap: 8px; font-size: 12px; color: var(--muted); }
+  .form input, .form select { height: 30px; border: 1px solid var(--border); border-radius: 7px;
+                              padding: 0 9px; font-size: 12.5px; color: var(--ink);
+                              background: #fff; width: 100%; box-sizing: border-box; }
+
+  /* ---------- 地图 ---------- */
+  .mapbox { height: 340px; border: 1px solid var(--border); border-radius: 8px;
+            overflow: hidden; background: #f4f6f8; position: relative; margin-bottom: 8px; }
+  .mapbox .ph { position: absolute; inset: 0; display: flex; align-items: center;
+                justify-content: center; text-align: center; padding: 18px;
+                font-size: 12px; color: var(--muted); line-height: 1.7; }
+  .mapinfo { position: absolute; left: 8px; bottom: 8px; background: rgba(255,255,255,.95);
+             border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px;
+             font-size: 11.5px; color: var(--ink); z-index: 5; }
+
+  /* ---------- 麦克风 ---------- */
+  .microw { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+  .microw button { height: 32px; padding: 0 12px; border-radius: 8px;
+                   border: 1px solid var(--border); background: #fff; cursor: pointer; font-size: 12.5px; }
+  .microw button:disabled { opacity: .6; cursor: default; }
+  .meter { flex: 1; height: 10px; background: #eef1f4; border-radius: 5px; overflow: hidden; }
+  .meterfill { height: 100%; width: 0%; background: var(--brand); transition: width .08s linear; }
+  .meterfill.hot { background: #e07a5f; }
+
   .yearbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
   .yearbar select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; color: var(--ink); background: #fff; }
 
@@ -125,7 +161,7 @@
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.5.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.6.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 消耗地图 · 语音</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -146,6 +182,9 @@
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
+      <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
+      <div class="tab" data-pane="map" onclick="switchTab('map')">消耗地图</div>
+      <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
 
     <!-- 区域统计 -->
@@ -275,13 +314,138 @@
         <button onclick="exportExcel()">导出 Excel（含企业名录）</button>
       </div>
     </section>
+
+    <!-- 投入产出 -->
+    <section class="pane" id="pane-io">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="ioYear" onchange="loadIO(this.value)"></select>
+        <span id="ioScope"></span>
+      </div>
+      <div class="kpis" id="ioKpis"></div>
+      <div class="notice" id="ioNotice"></div>
+      <div class="sect-title">
+        <span>分省消耗金额（亿元）</span>
+        <span class="hintline" id="ioBasis"></span>
+      </div>
+      <div class="scroll" style="max-height: 240px">
+        <table id="ioProvTable">
+          <thead>
+            <tr>
+              <th class="num">#</th><th>省份</th>
+              <th class="num">占比(%)</th><th class="num">金额(亿元)</th><th>口径</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="ioCityWrap" style="display: none">
+        <div class="sect-title">
+          <span>省内城市分摊</span>
+          <span class="hintline">地级市无投入产出表，按企业分布分摊</span>
+        </div>
+        <div class="scroll" style="max-height: 180px">
+          <table id="ioCityTable">
+            <thead><tr><th>城市</th><th class="num">企业量(万吨)</th><th class="num">金额(亿元)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="sect-title">
+        <span>企业采购金额</span>
+        <span class="hintline" id="ioEntHint">年经手量 × 均价</span>
+      </div>
+      <div class="scroll" style="max-height: 220px">
+        <table id="ioEntTable">
+          <thead>
+            <tr><th>企业</th><th>省 / 市</th><th class="num">年经手量</th><th class="num">金额(亿元)</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button onclick="loadIO(state.year)">刷新</button>
+        <button onclick="exportExcel()">导出 Excel</button>
+      </div>
+    </section>
+
+    <!-- 消耗地图 -->
+    <section class="pane" id="pane-map">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="mapYear" onchange="loadMap(this.value)"></select>
+        <span id="mapScope"></span>
+      </div>
+      <div class="notice" id="mapNotice"></div>
+      <div class="mapbox" id="mapBox">
+        <div class="ph" id="mapPlaceholder">地图未加载</div>
+      </div>
+      <div class="sect-title">
+        <span>省份消耗金额排行</span>
+        <span class="hintline">无地图密钥时以此为准</span>
+      </div>
+      <div class="chart" id="mapRank"></div>
+      <div class="actions">
+        <button onclick="loadMap(state.year)">重新加载</button>
+        <button onclick="switchTab('settings')">配置地图密钥</button>
+      </div>
+    </section>
+
+    <!-- 设置：模型配置 + 麦克风自检 -->
+    <section class="pane" id="pane-settings">
+      <div class="sect-title">
+        <span>模型配置（接入 API 思考）</span>
+        <span class="hintline" id="llmState"></span>
+      </div>
+      <div class="notice" id="llmNotice"></div>
+      <div class="form">
+        <label>预设<select id="llmPreset" onchange="applyPreset(this.value)"></select></label>
+        <label>Base URL<input id="llmBase" placeholder="https://api.deepseek.com/v1" /></label>
+        <label>模型名<input id="llmModel" placeholder="deepseek-chat" /></label>
+        <label>API Key<input id="llmKey" type="password" placeholder="留空则沿用已保存的密钥" /></label>
+        <label>温度<input id="llmTemp" type="number" step="0.1" min="0" max="2" value="0.3" /></label>
+        <label>最大 tokens<input id="llmTokens" type="number" min="50" max="4000" value="600" /></label>
+        <label>地图 Key<input id="mapKey" type="password" placeholder="腾讯位置服务 key（仅存本机浏览器）" /></label>
+      </div>
+      <div class="actions">
+        <button onclick="saveLLM()">保存配置</button>
+        <button onclick="testLLM()">测试连接</button>
+      </div>
+      <div class="export-msg" id="llmMsg"></div>
+
+      <div class="sect-title">
+        <span>麦克风自检</span>
+        <span class="hintline" id="micEnv"></span>
+      </div>
+      <div class="notice" id="micNotice"></div>
+      <div class="microw">
+        <button id="micCheckBtn" onclick="micCheck()">检测收音（3 秒）</button>
+        <div class="meter"><div class="meterfill" id="micMeter"></div></div>
+        <span id="micPeak" style="font-size:11.5px;color:var(--muted);width:52px;text-align:right">—</span>
+      </div>
+      <div class="scroll" style="max-height: 132px">
+        <table id="micDevices">
+          <thead><tr><th>输入设备</th><th>状态</th></tr></thead>
+          <tbody><tr><td colspan="2" class="empty">点上面的按钮授权后列出设备</td></tr></tbody>
+        </table>
+      </div>
+      <div class="export-msg" id="micMsg"></div>
+      <div class="sect-title">
+        <span>语音识别实测</span>
+        <span class="hintline">说一句话，看输入框是否出字</span>
+      </div>
+      <div class="actions">
+        <button onclick="micRecognize()">开始识别</button>
+      </div>
+      <div class="export-msg" id="micResult"></div>
+    </section>
   </aside>
 </div>
 
 <script>
   const SUGGESTIONS = [
     "纸箱能回收吗", "办公用纸 3kg", "山东省回收量",
-    "全国统计", "历年数据", "分类回收数据"
+    "全国统计", "历年数据", "分类回收数据", "废纸消耗金额"
   ];
   const messagesEl = document.getElementById("messages");
   const chipsEl = document.getElementById("chips");
@@ -314,12 +478,21 @@
     inputEl.value = "";
     sendBtn.disabled = true;
     try {
-      const res = await fetch("/chat", {
+      // 走 /api/llm/chat：配置了大模型就用大模型，没配置自动回落规则引擎
+      const res = await fetch("/api/llm/chat", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({ message: text })
       });
       const data = await res.json();
       addMsg(data.reply, "bot");
+      if (data.engine === "llm") {
+        const tag = document.createElement("div");
+        tag.className = "msg bot";
+        tag.style.cssText = "font-size:10.5px;color:var(--muted);padding:0 2px 6px";
+        tag.textContent = `（由 ${data.model || "大模型"} 生成，${data.latency_ms} ms）`;
+        messagesEl.appendChild(tag);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
     } catch (e) {
       addMsg("服务暂时不可用：" + e, "bot");
     } finally {
@@ -336,6 +509,9 @@
       p.classList.toggle("active", p.id === "pane-" + name);
     });
     if (name === "enterprise") loadEnterprises();
+    if (name === "io") loadIO(state.year);
+    if (name === "map") loadMap(state.year);
+    if (name === "settings") loadSettings();
   }
 
   /* ---------------- 区域 ---------------- */
@@ -681,7 +857,7 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(obj), 4000);
-      say(`已导出 ${name}（6 张工作表）`);
+      say(`已导出 ${name}（7 张工作表）`);
       restore("已导出 ✓");
       setTimeout(() => restore(label || "导出 Excel"), 1600);
     } catch (e) {
@@ -694,6 +870,515 @@
       }
       restore("导出失败");
       setTimeout(() => restore(label || "导出 Excel"), 2400);
+    }
+  }
+
+  /* ================= 投入产出（消耗金额） ================= */
+  function fmtNum(n, d) {
+    if (n === null || n === undefined || n === "") return "—";
+    const v = Number(n);
+    if (!isFinite(v)) return "—";
+    return v.toLocaleString("zh-CN", {
+      minimumFractionDigits: d || 0, maximumFractionDigits: d || 0
+    });
+  }
+
+  function kpiCard(k, v, u, note) {
+    return `<div class="kpi"><div class="k">${k}</div>
+      <div class="v">${v}<span class="u">${u}</span></div>
+      <div class="n">${note || ""}</div></div>`;
+  }
+
+  function fillYearSelect(id, years, current) {
+    const sel = document.getElementById(id);
+    if (!sel || !years || !years.length) return;
+    const sig = years.join(",");
+    if (sel.dataset.filled !== sig) {
+      sel.innerHTML = years.slice().sort((a, b) => b - a)
+        .map(y => `<option value="${y}">${y}</option>`).join("");
+      sel.dataset.filled = sig;
+    }
+    sel.value = current;
+  }
+
+  async function loadIO(year) {
+    const y = Number(year) || state.year;
+    const q = state.code && state.code !== "CN"
+      ? `&code=${encodeURIComponent(state.code)}` : "";
+    let d;
+    try {
+      d = await (await fetch(`/api/io?year=${y}${q}`)).json();
+    } catch (e) {
+      document.getElementById("ioNotice").textContent = "接口不可用：" + e;
+      return;
+    }
+
+    fillYearSelect("ioYear", d.years, d.spend.year);
+    document.getElementById("ioScope").textContent =
+      d.scope && d.scope !== "全国" ? `· ${d.scope}` : "";
+
+    const s = d.spend, dc = d.direct_coefficient, uc = d.unit_consumption;
+    document.getElementById("ioKpis").innerHTML = [
+      kpiCard("废纸消耗金额", fmtNum(s.amount, 1), "亿元",
+        `${s.provenance}；按回收参考价计，属纸厂成本下限`),
+      kpiCard("直接消耗系数",
+        dc.coefficient === null || dc.coefficient === undefined ? "—" : fmtNum(dc.coefficient_pct, 2),
+        "%",
+        dc.coefficient === null
+          ? "该年造纸业营收无公开值"
+          : `货值 ${fmtNum(dc.spend, 1)} 亿 ÷ 营收 ${fmtNum(dc.revenue, 0)} 亿`),
+      kpiCard("单位产值消耗",
+        uc.value === null || uc.value === undefined ? "—" : fmtNum(uc.value, 3),
+        "吨/万元", "消耗量 ÷ 营业收入"),
+      kpiCard("加权参考价", fmtNum(s.avg_price, 0), "元/吨",
+        "分类结构加权，居民 / 回收站口径")
+    ].join("");
+
+    document.getElementById("ioNotice").innerHTML =
+      `<b>口径分级</b>：` +
+      d.levels.map(l =>
+        `${l.name}（${l.io_available ? "有官方表" : "无官方表"}，${l.provenance}）`
+      ).join("　") +
+      `。国家统计局明确「地级市暂不编制投入产出表」，企业只有财务报表——` +
+      `这两级的金额都是分摊估算，不能当作统计公报数据引用。`;
+
+    document.getElementById("ioBasis").textContent = d.provinces.basis;
+    document.querySelector("#ioProvTable tbody").innerHTML =
+      d.provinces.rows.map(r => `
+        <tr class="row" onclick="loadStats('${r.code}', ${d.spend.year})">
+          <td class="num">${r.rank}</td>
+          <td>${r.name}</td>
+          <td class="num">${r.share_pct}</td>
+          <td class="num">${fmtNum(r.amount, 1)}</td>
+          <td>${r.provenance}</td>
+        </tr>`).join("");
+
+    // 省内城市分摊（仅选中省份时有）
+    const cityWrap = document.getElementById("ioCityWrap");
+    if (d.cities && d.cities.cities && d.cities.cities.length) {
+      cityWrap.style.display = "block";
+      document.querySelector("#ioCityTable tbody").innerHTML =
+        d.cities.cities.map(c => `
+          <tr><td>${c.city}</td>
+              <td class="num">${fmtNum(c.enterprise_volume, 1)}</td>
+              <td class="num">${fmtNum(c.amount, 2)}</td></tr>`).join("");
+    } else {
+      cityWrap.style.display = "none";
+    }
+
+    const ent = d.enterprises;
+    document.getElementById("ioEntHint").textContent =
+      `${ent.rows.length} 家 · 均价 ${fmtNum(ent.avg_price, 0)} 元/吨 · ${ent.provenance}`;
+    document.querySelector("#ioEntTable tbody").innerHTML =
+      ent.rows.slice(0, 40).map(e => `
+        <tr><td>${e.name}</td>
+            <td>${e.province} / ${e.city}</td>
+            <td class="num">${fmtNum(e.volume, 1)}</td>
+            <td class="num">${fmtNum(e.amount, 2)}</td></tr>`).join("");
+  }
+
+  /* ================= 消耗地图 ================= */
+  // 合规：底图只用腾讯位置服务（正版底图、有审图号），且不内置任何可用密钥。
+  // 没有 key 时降级为排行视图，绝不自行绘制国界。
+  let TMAP_KEY_LOCAL = "";
+
+  function loadScriptOnce(src, id) {
+    return new Promise((resolve, reject) => {
+      const old = document.getElementById(id);
+      if (old) { resolve(); return; }
+      const s = document.createElement("script");
+      s.id = id;
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("SDK 加载失败"));
+      document.head.appendChild(s);
+    });
+  }
+
+  function bubbleIcon(size, hot) {
+    const fill = hot ? "#C0392B" : "#2F7D4F";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">`
+      + `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 1.5}" `
+      + `fill="${fill}" fill-opacity="0.72" stroke="${fill}" stroke-width="1.2"/></svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function renderMapRank(points, unit) {
+    const top = points.slice(0, 12);
+    const max = Math.max.apply(null, points.map(p => p.amount).concat([1]));
+    document.getElementById("mapRank").innerHTML = top.map(p => `
+      <div class="rowc" style="grid-template-columns:74px 1fr 64px">
+        <span class="lbl">${p.name}</span>
+        <div class="track"><div class="fill" style="width:${(p.amount / max * 100).toFixed(1)}%"></div></div>
+        <span class="val">${fmtNum(p.amount, 1)}</span>
+      </div>`).join("") +
+      `<div style="font-size:10.5px;color:var(--muted);margin-top:6px">
+        单位：${unit}；按回收参考价计价，属纸厂废纸成本下限
+      </div>`;
+  }
+
+  async function loadMap(year) {
+    const y = Number(year) || state.year;
+    const notice = document.getElementById("mapNotice");
+    const box = document.getElementById("mapBox");
+    let cfg, data;
+    try {
+      cfg = await (await fetch("/api/map/config")).json();
+      data = await (await fetch(`/api/map/data?year=${y}`)).json();
+    } catch (e) {
+      notice.textContent = "接口不可用：" + e;
+      return;
+    }
+
+    fillYearSelect("mapYear", [y], y);
+    document.getElementById("mapScope").textContent = `· ${y} 年`;
+    renderMapRank(data.points, data.unit);
+
+    const saved = (localStorage.getItem("tmapKey") || TMAP_KEY_LOCAL || "").trim();
+    const key = saved || (cfg.key || "").trim();
+    if (saved) {
+      const ki = document.getElementById("mapKey");
+      if (ki) ki.placeholder = "已保存在本机浏览器（留空即沿用）";
+    }
+
+    if (!key) {
+      box.innerHTML = `<div class="ph">未配置地图密钥，已降级为下方的省份排行。<br>
+        地图底图需使用腾讯位置服务（正版底图，带审图号）。<br>
+        请到 <a href="${cfg.apply_url}" target="_blank" rel="noopener">腾讯位置服务控制台</a>
+        申请免费 key，再到「设置 → 地图 Key」填入。</div>`;
+      notice.innerHTML = cfg.attribution + " " + cfg.fallback;
+      return;
+    }
+
+    box.innerHTML = `<div class="ph">地图加载中…</div>`;
+    try {
+      if (!window.TMap) {
+        await loadScriptOnce(cfg.sdk_url + "&key=" + encodeURIComponent(key), "tmap-sdk");
+      }
+      drawBubbles(box, data);
+      notice.innerHTML = cfg.attribution;
+    } catch (e) {
+      box.innerHTML = `<div class="ph">地图 SDK 加载失败：${String(e.message || e)}<br>
+        常见原因：key 未开通 Web 端 / Referer 白名单不含当前地址 / 网络不可达。<br>
+        已降级为下方排行视图。</div>`;
+      notice.innerHTML = cfg.attribution + " " + cfg.fallback;
+    }
+  }
+
+  function drawBubbles(box, data) {
+    box.innerHTML = "";
+    const canvas = document.createElement("div");
+    canvas.style.cssText = "width:100%;height:100%";
+    box.appendChild(canvas);
+    const info = document.createElement("div");
+    info.className = "mapinfo";
+    info.id = "mapInfo";
+    info.textContent = "点气泡查看省份金额";
+    box.appendChild(info);
+
+    const map = new TMap.Map(canvas, {
+      center: new TMap.LatLng(35.2, 105.5),
+      zoom: 4,
+      viewMode: "2D"
+    });
+
+    const LEVELS = 5;
+    const styles = {};
+    for (let i = 1; i <= LEVELS; i++) {
+      const size = 16 + i * 7;
+      styles["s" + i] = new TMap.MarkerStyle({
+        width: size, height: size,
+        anchor: { x: size / 2, y: size / 2 },
+        src: bubbleIcon(size, i >= 4)
+      });
+    }
+
+    const geometries = data.points.map(p => {
+      const lv = Math.max(1, Math.min(LEVELS, Math.ceil((p.ratio || 0) * LEVELS)));
+      return {
+        id: p.code,
+        styleId: "s" + lv,
+        position: new TMap.LatLng(p.lat, p.lon),
+        properties: { name: p.name, amount: p.amount, rank: p.rank }
+      };
+    });
+
+    const layer = new TMap.MultiMarker({ map: map, styles: styles, geometries: geometries });
+    layer.on("click", evt => {
+      const p = (evt.geometry && evt.geometry.properties) || {};
+      const el = document.getElementById("mapInfo");
+      if (el) {
+        el.textContent = `${p.name}：${fmtNum(p.amount, 1)} ${data.unit}（全国第 ${p.rank} 位）`;
+      }
+    });
+    window.__tmap = map;
+  }
+
+  /* ================= 设置：模型配置 ================= */
+  let LLM_PRESETS = [];
+
+  async function loadSettings() {
+    micEnv();
+    try {
+      const s = await (await fetch("/api/llm/config")).json();
+      LLM_PRESETS = s.presets || [];
+      const c = s.config;
+      const sel = document.getElementById("llmPreset");
+      sel.innerHTML = '<option value="">自定义</option>' + LLM_PRESETS
+        .map(p => `<option value="${p.base_url}">${p.name}</option>`).join("");
+      document.getElementById("llmBase").value = c.base_url || "";
+      document.getElementById("llmModel").value = c.model || "";
+      document.getElementById("llmTemp").value = c.temperature;
+      document.getElementById("llmTokens").value = c.max_tokens;
+      document.getElementById("llmKey").placeholder = c.has_api_key
+        ? `已保存 ${c.api_key_masked}（留空沿用）` : "尚未配置密钥";
+      document.getElementById("llmState").textContent = c.configured
+        ? `已配置 · ${c.model} · 来源 ${c.source}` : "未配置（对话走规则引擎）";
+      document.getElementById("llmNotice").innerHTML = c.configured
+        ? "配置保存在服务端 <code>config/llm.json</code>（已加入 .gitignore），接口只返回脱敏密钥。"
+        : "没配置也能用：对话会自动回落到内置规则引擎。要接入大模型，填 Base URL、模型名与 API Key 后保存。";
+      if (localStorage.getItem("tmapKey")) {
+        document.getElementById("mapKey").placeholder = "已保存在本机浏览器（留空即沿用）";
+      }
+    } catch (e) {
+      document.getElementById("llmNotice").textContent = "读取配置失败：" + e;
+    }
+  }
+
+  function applyPreset(url) {
+    if (!url) return;
+    document.getElementById("llmBase").value = url;
+    const hit = LLM_PRESETS.filter(p => p.base_url === url)[0];
+    if (hit) document.getElementById("llmModel").value = hit.model;
+  }
+
+  async function saveLLM() {
+    const msg = document.getElementById("llmMsg");
+    msg.classList.remove("err");
+    const mapKey = document.getElementById("mapKey").value.trim();
+    if (mapKey) {
+      localStorage.setItem("tmapKey", mapKey);
+      TMAP_KEY_LOCAL = mapKey;
+    }
+    msg.textContent = "保存中…";
+    try {
+      const res = await fetch("/api/llm/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_url: document.getElementById("llmBase").value.trim(),
+          api_key: document.getElementById("llmKey").value.trim() || null,
+          model: document.getElementById("llmModel").value.trim(),
+          temperature: Number(document.getElementById("llmTemp").value || 0.3),
+          max_tokens: Number(document.getElementById("llmTokens").value || 600)
+        })
+      });
+      const d = await res.json();
+      document.getElementById("llmKey").value = "";
+      msg.textContent = "已保存：" + d.config.model
+        + (mapKey ? "；地图 key 已存本机浏览器" : "");
+      await loadSettings();
+    } catch (e) {
+      msg.textContent = "保存失败：" + e;
+      msg.classList.add("err");
+    }
+  }
+
+  async function testLLM() {
+    const msg = document.getElementById("llmMsg");
+    msg.classList.remove("err");
+    msg.textContent = "测试中…";
+    try {
+      const d = await (await fetch("/api/llm/test", { method: "POST" })).json();
+      if (d.ok) {
+        msg.textContent = `连通正常：${d.model}，${d.latency_ms} ms，返回「${d.reply}」`;
+      } else {
+        msg.textContent = "失败：" + d.error;
+        msg.classList.add("err");
+      }
+    } catch (e) {
+      msg.textContent = "请求失败：" + e;
+      msg.classList.add("err");
+    }
+  }
+
+  /* ================= 麦克风自检 =================
+     只判断「有没有权限」是不够的：权限给了也可能没声音。
+     这里真的读音频流算 RMS，3 秒内看峰值，才能回答「能不能收音」。
+  */
+  let micStream = null;
+  let micCtx = null;
+  let micRAF = 0;
+
+  function micEnv() {
+    const el = document.getElementById("micEnv");
+    if (!el) return;
+    const secure = window.isSecureContext;
+    const gum = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    el.textContent = `安全上下文 ${secure ? "✓" : "✗"} · 录音 ${gum ? "✓" : "✗"} · 识别 ${SR ? "✓" : "✗"}`;
+  }
+
+  async function listMics() {
+    const tb = document.querySelector("#micDevices tbody");
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === "audioinput");
+      if (!mics.length) {
+        tb.innerHTML = '<tr><td colspan="2" class="empty">没有检测到音频输入设备</td></tr>';
+        return;
+      }
+      tb.innerHTML = mics.map((d, i) =>
+        `<tr><td>${d.label || ("麦克风 " + (i + 1) + "（未授权时无名称）")}</td>
+             <td>${d.deviceId === "default" ? "系统默认" : "可用"}</td></tr>`).join("");
+    } catch (e) {
+      tb.innerHTML = `<tr><td colspan="2" class="empty">读取设备失败：${e}</td></tr>`;
+    }
+  }
+
+  async function micCheck() {
+    const btn = document.getElementById("micCheckBtn");
+    const msg = document.getElementById("micMsg");
+    const meter = document.getElementById("micMeter");
+    const peakEl = document.getElementById("micPeak");
+    msg.classList.remove("err");
+
+    if (!window.isSecureContext) {
+      msg.textContent = "当前页面不是 HTTPS / localhost，浏览器会直接拒绝录音。请用 http://localhost:8000 打开。";
+      msg.classList.add("err");
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      msg.textContent = "当前浏览器不支持 getUserMedia，无法检测麦克风。";
+      msg.classList.add("err");
+      return;
+    }
+
+    btn.disabled = true;
+    msg.textContent = "正在申请麦克风权限…";
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      btn.disabled = false;
+      const map = {
+        NotAllowedError: "权限被拒绝：点地址栏左侧的锁 / 麦克风图标 → 允许麦克风，再刷新页面。",
+        NotFoundError: "没有找到麦克风设备。",
+        NotReadableError: "麦克风被其他程序占用（会议软件、录屏工具等），关掉后再试。",
+        OverconstrainedError: "麦克风不支持当前参数。",
+        SecurityError: "安全策略禁止访问麦克风。"
+      };
+      msg.textContent = map[err.name] || ("录音失败：" + err.name + " " + err.message);
+      msg.classList.add("err");
+      return;
+    }
+
+    await listMics();
+
+    micCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = micCtx.createMediaStreamSource(micStream);
+    const analyser = micCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    src.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+
+    let peak = 0;
+    const started = Date.now();
+    msg.textContent = "正在检测，请对着麦克风说句话…";
+
+    const finish = () => {
+      cancelAnimationFrame(micRAF);
+      btn.disabled = false;
+      meter.style.width = "0%";
+      if (micStream) {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+      }
+      if (micCtx) {
+        micCtx.close();
+        micCtx = null;
+      }
+      const pct = (peak * 100).toFixed(0);
+      if (peak < 0.01) {
+        msg.textContent = `3 秒内几乎没收到声音（峰值 ${pct}%）。检查：系统输入设备是否选对、`
+          + `麦克风是否静音、有没有硬件静音开关。`;
+        msg.classList.add("err");
+      } else if (peak < 0.05) {
+        msg.textContent = `有声音但很弱（峰值 ${pct}%）。把麦克风靠近一点，或在系统里调高输入音量。`;
+      } else {
+        msg.textContent = `收音正常（峰值 ${pct}%）。可以试下面的语音识别。`;
+      }
+    };
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > peak) peak = rms;
+      meter.style.width = Math.min(100, rms * 400).toFixed(0) + "%";
+      meter.classList.toggle("hot", rms > 0.25);
+      peakEl.textContent = (peak * 100).toFixed(0) + "%";
+      if (Date.now() - started < 3000) {
+        micRAF = requestAnimationFrame(tick);
+      } else {
+        finish();
+      }
+    };
+    tick();
+  }
+
+  async function micRecognize() {
+    const out = document.getElementById("micResult");
+    out.classList.remove("err");
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      out.textContent = "当前浏览器不支持语音识别（Chrome / Edge 可用）。";
+      out.classList.add("err");
+      return;
+    }
+    out.textContent = "正在听… 请说一句话";
+    const r = new SR();
+    r.lang = "zh-CN";
+    r.interimResults = true;
+    r.continuous = false;
+    let finalText = "";
+
+    r.onresult = ev => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t; else interim += t;
+      }
+      out.textContent = "识别中：" + (finalText + interim);
+    };
+    r.onerror = ev => {
+      const map = {
+        "not-allowed": "麦克风权限被拒绝。",
+        "service-not-allowed": "浏览器禁用了语音识别服务。",
+        "audio-capture": "没有检测到麦克风。",
+        network: "识别服务连不上（Chrome 需要联网）。",
+        "no-speech": "没有听到声音。",
+        "language-not-supported": "不支持中文识别。"
+      };
+      out.textContent = map[ev.error] || ("识别失败：" + ev.error);
+      out.classList.add("err");
+    };
+    r.onend = () => {
+      if (finalText.trim()) {
+        out.textContent = `识别成功：「${finalText.trim()}」已填入输入框`;
+        inputEl.value = finalText.trim();
+      } else if (!out.classList.contains("err")) {
+        out.textContent = "没有识别到文字。可能是环境太吵，或识别服务连不上。";
+        out.classList.add("err");
+      }
+    };
+    try {
+      r.start();
+    } catch (e) {
+      out.textContent = "启动失败：" + e.message;
+      out.classList.add("err");
     }
   }
 
