@@ -2,15 +2,15 @@
 
 运行：uvicorn app.server:app --reload
 接口：
-  GET  /            -> 图形界面（聊天 + 年鉴/行业数据面板）
-  GET  /api/info    -> {categories, industry, quality, sources}
-  POST /chat        -> {"reply": "..."}
-  GET  /health      -> {"status": "ok"}
+  GET  / 与 /index.html -> 图形界面（聊天 + 年鉴/行业数据面板）
+  GET  /api/info        -> {categories, industry, quality, sources}
+  POST /chat            -> {"reply": "..."}
+  GET  /health          -> {"status": "ok"}
 """
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,9 +29,16 @@ class ChatReq(BaseModel):
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
     return HTMLResponse(html)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    # 避免浏览器请求 favicon 时产生 404 噪音
+    return Response(status_code=204)
 
 
 @app.get("/api/info")
