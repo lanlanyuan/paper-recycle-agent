@@ -93,12 +93,8 @@ def main() -> int:
     )
 
     commit = _git("rev-parse", "--short", "HEAD")
-    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
-    count = _git("rev-list", "--count", "HEAD")
     if commit:
-        parts.append(
-            f"- 当前提交：`{commit}`（分支 `{branch}`，历史共 {count} 次提交）\n"
-        )
+        parts.append(f"- 生成时提交：`{commit}`\n")
 
     parts.append("\n## 目录\n")
     for title, _, _ in SECTIONS:
