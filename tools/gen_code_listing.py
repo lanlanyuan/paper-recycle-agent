@@ -26,6 +26,7 @@ LANG = {
     ".txt": "text",
     ".md": "markdown",
     ".sh": "bash",
+    ".example": "csv",
 }
 
 # (标题, 目录或文件, 是否递归)
@@ -42,6 +43,7 @@ ROOT_FILES = [
     "conftest.py",
     "pyproject.toml",
     "requirements.txt",
+    "data/enterprises.csv.example",
     ".github/workflows/ci.yml",
 ]
 

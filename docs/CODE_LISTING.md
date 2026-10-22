@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.3.0　生成日期：2026-10-22　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.4.0　生成日期：2026-10-22　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`278bbb3`
+- 生成时提交：`8abe69d`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -16,20 +16,22 @@
 
 ## 一、核心包（src/paper_recycle_agent）
 
-### `src/paper_recycle_agent/__init__.py`（18 行）
+### `src/paper_recycle_agent/__init__.py`（20 行）
 
 ```python
 """废纸回收 Agent 对话助手。"""
 
-from . import agent, classifier, data, exporter, knowledge, pricing, regions, stats
+from . import (agent, classifier, data, enterprises, exporter, knowledge,
+               pricing, regions, stats)
 from .agent import respond
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 __all__ = [
     "agent",
     "classifier",
     "data",
+    "enterprises",
     "exporter",
     "knowledge",
     "pricing",
@@ -39,7 +41,7 @@ __all__ = [
 ]
 ```
 
-### `src/paper_recycle_agent/agent.py`（101 行）
+### `src/paper_recycle_agent/agent.py`（131 行）
 
 ```python
 """对话引擎：把分类 / 估价 / 统计能力包装成自然语言回复。"""
@@ -47,7 +49,7 @@ __all__ = [
 import re
 from typing import Optional
 
-from . import classifier, data, pricing, regions
+from . import classifier, data, enterprises, pricing, regions
 from . import stats as stats_mod
 
 _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
@@ -59,6 +61,9 @@ _CATEGORY_STATS = {"分类数据", "分类回收", "类别占比", "各类回收
 # 年鉴 / 标准 / 分类定义类
 _DATA = {"年鉴", "行业数据", "进口", "标准", "分类标准", "gb/t", "20811",
          "造纸", "废纸分几类", "废纸分类"}
+# 企业维度类（放在区域之前匹配，避免「回收量」先命中）
+_ENTERPRISE = {"企业", "公司", "回收站", "回收点", "打包厂", "分拣中心",
+               "造纸厂", "贸易商", "名录", "哪家", "厂家", "老板"}
 # 区域统计类（仅全国与省级）
 _REGION = {"回收量", "利用率", "回收率", "统计", "企业数", "从业人员", "数据", "排名", "占比"}
 
@@ -104,6 +109,17 @@ def respond(user_input: str) -> str:
         year = _extract_year(text) or stats_mod.LATEST_YEAR
         return stats_mod.category_summary(year)
 
+    # 直接命中企业名（如「鲁清再生」）
+    hit = enterprises.find(text)
+    if hit:
+        return _company_card(hit)
+
+    # 企业维度：带「企业 / 公司 / 回收站」等词时，按省汇总
+    if any(k in text for k in _ENTERPRISE):
+        node = regions.find(text)
+        code = str(node["code"]) if node and node["level"] == "province" else None
+        return enterprises.summary(code)
+
     # 历年趋势
     if any(k in text for k in _HISTORY):
         return stats_mod.history_summary()
@@ -130,6 +146,21 @@ def respond(user_input: str) -> str:
     return classifier.classify(text)["message"]
 
 
+def _company_card(hit: dict) -> str:
+    """单个企业的信息卡。"""
+    lines = [
+        f"【{hit['name']}】",
+        f"- 位置：{hit['city']}（{hit['lat']}, {hit['lon']}）",
+        f"- 类型：{hit['type']}",
+        f"- 主营：{'、'.join(hit['category_names'])}",
+        f"- 年回收量：{hit['volume']} 万吨",
+        f"- 备注：{hit['note']}",
+    ]
+    if hit["is_demo"]:
+        lines.append("（示例数据，可在 data/enterprises.csv 替换为真实名录）")
+    return "\n".join(lines)
+
+
 def _help_text() -> str:
     return "\n".join(
         [
@@ -140,7 +171,8 @@ def _help_text() -> str:
             "4) 按类别看回收量：输入「分类回收数据」「2020 年分类数据」。",
             "5) 看历年趋势：输入「历年数据」「近五年趋势」。",
             "6) 看区域统计（仅全国与省级）：输入「山东省回收量」「全国统计」「排名」。",
-            "7) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、说明五张表。",
+            "7) 看企业分布：输入「企业名录」「山东有哪些回收企业」「分拣中心」。",
+            "8) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、说明六张表。",
         ]
     )
 ```
@@ -236,7 +268,7 @@ def list_categories() -> List[Dict[str, object]]:
     ]
 ```
 
-### `src/paper_recycle_agent/cli.py`（84 行）
+### `src/paper_recycle_agent/cli.py`（99 行）
 
 ```python
 """命令行交互入口。"""
@@ -264,6 +296,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("history", help="历年回收量 / 回收率 / 利用率")
     cs = sub.add_parser("catstats", help="按八大类拆分回收量")
     cs.add_argument("year", type=int, nargs="?", default=stats_mod.LATEST_YEAR)
+    en = sub.add_parser("enterprises", help="企业名录（可按省 / 类型筛选）")
+    en.add_argument("--province", default=None, help="省名，如 山东")
+    en.add_argument("--type", dest="etype", default=None, help="企业类型")
     rg = sub.add_parser("region", help="区域统计（全国 / 省级）")
     rg.add_argument("name", nargs="?", default="全国")
     ex = sub.add_parser("export", help="导出 Excel")
@@ -291,6 +326,18 @@ def main(argv=None) -> int:
         print(stats_mod.history_summary())
     elif args.cmd == "catstats":
         print(stats_mod.category_summary(args.year))
+    elif args.cmd == "enterprises":
+        from . import enterprises as ent_mod
+
+        node = regions.find(args.province) if args.province else None
+        code = str(node["code"]) if node and node["level"] == "province" else None
+        if args.etype:
+            rows = ent_mod.list_enterprises(code, None, args.etype)
+            for e in rows:
+                print(f"- {e['name']}（{e['city']}·{e['type']}）{e['volume']} 万吨")
+            print(f"共 {len(rows)} 家")
+        else:
+            print(ent_mod.summary(code))
     elif args.cmd == "region":
         node = regions.find(args.name)
         print(regions.summary(str(node["code"]) if node else "CN"))
@@ -301,7 +348,7 @@ def main(argv=None) -> int:
         content = exporter.build_workbook(str(node["code"]), args.year)
         with open(args.out, "wb") as fh:
             fh.write(content)
-        print(f"已导出：{args.out}（{len(content)} 字节，5 张工作表）")
+        print(f"已导出：{args.out}（{len(content)} 字节，6 张工作表）")
     else:
         _chat_loop()
     return 0
@@ -444,7 +491,338 @@ def summary_text() -> str:
     return "\n".join(lines)
 ```
 
-### `src/paper_recycle_agent/exporter.py`（220 行）
+### `src/paper_recycle_agent/enterprises.py`（326 行）
+
+```python
+"""企业维度：回收企业名录 + 地理位置 + 主营品类 + 年回收量。
+
+为什么要有这一层
+----------------
+前三个模块（区域 / 历年 / 分类）回答的是「一个地方、一个年份、一个品类有多少量」。
+但在真实业务里，统计口径最终要落到**企业**身上：某省的量是谁在做？分布在哪些城市？
+各品类分别由哪类企业消化？这正是统计局核查、协会统计、回收企业找货源都要回答的问题。
+
+数据性质（重要）
+----------------
+- 内置的 `ENTERPRISE_SEEDS` 是**示例名录**，企业名称为虚构，量级参考行业公开信息，
+  仅用于演示「企业 × 地理位置 × 品类」这套数据结构与分析能力。
+- 每条记录带 `is_demo = True`，界面与导出都会显示「示例」标记。
+- 替换为真实名录：在项目根目录放 `data/enterprises.csv`（表头见 `CSV_FIELDS`），
+  启动时会自动加载并覆盖示例数据，`is_demo` 变为 False。
+
+CSV 字段
+--------
+id,name,province_code,city,type,categories,volume,lat,lon,note
+categories 用分号或竖线分隔的大类代码，如 "1;8"
+"""
+
+import csv
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import zlib
+
+# 省级行政中心近似经纬度，用于把企业点落到地图示意坐标上
+PROVINCE_CENTROID: Dict[str, tuple] = {
+    "110000": (39.90, 116.41), "120000": (39.13, 117.20), "130000": (38.04, 114.51),
+    "140000": (37.87, 112.55), "150000": (40.82, 111.75), "210000": (41.80, 123.43),
+    "220000": (43.90, 125.32), "230000": (45.80, 126.53), "310000": (31.23, 121.47),
+    "320000": (32.06, 118.80), "330000": (30.27, 120.15), "340000": (31.86, 117.28),
+    "350000": (26.07, 119.30), "360000": (28.68, 115.89), "370000": (36.65, 117.00),
+    "410000": (34.75, 113.62), "420000": (30.59, 114.30), "430000": (28.19, 112.98),
+    "440000": (23.13, 113.26), "450000": (22.82, 108.32), "460000": (20.04, 110.32),
+    "500000": (29.56, 106.55), "510000": (30.65, 104.07), "520000": (26.58, 106.71),
+    "530000": (25.04, 102.71), "540000": (29.65, 91.13), "610000": (34.34, 108.94),
+    "620000": (36.06, 103.83), "630000": (36.62, 101.78), "640000": (38.47, 106.27),
+    "650000": (43.79, 87.62), "710000": (25.03, 121.57), "810000": (22.32, 114.17),
+    "820000": (22.20, 113.54),
+}
+
+# 企业类型
+TYPES: List[str] = ["回收站点", "分拣打包中心", "造纸企业", "贸易商"]
+
+TYPE_DESC: Dict[str, str] = {
+    "回收站点": "社区/街镇前端回收，量小面广，主要收废纸箱与混合废纸",
+    "分拣打包中心": "区域集散与分拣打包，决定品类纯度与去向",
+    "造纸企业": "自建回收网络，直接消化废纸制浆，量大且品类要求明确",
+    "贸易商": "跨区域调货，价格敏感，承担库存与物流",
+}
+
+CSV_FIELDS = ["id", "name", "province_code", "city", "type",
+              "categories", "volume", "lat", "lon", "note"]
+
+# (id, 名称, 省代码, 城市, 类型, 主营大类, 年回收量万吨, 备注)
+ENTERPRISE_SEEDS = [
+    ("E001", "鲁清再生资源有限公司", "370000", "济南市", "分拣打包中心", ["1", "8"], 26.0, "辐射鲁中，纸箱为主"),
+    ("E002", "青岛海岳废纸分拣中心", "370000", "青岛市", "分拣打包中心", ["1", "2"], 18.5, "港口周边，外贸包装来源多"),
+    ("E003", "山东晨鸣纸业原料基地", "370000", "潍坊市", "造纸企业", ["1", "5"], 42.0, "自建回收网络，直接制浆"),
+    ("E004", "临沂商城废纸回收站", "370000", "临沂市", "回收站点", ["1", "8"], 2.4, "批发市场前端回收"),
+    ("E005", "粤丰再生资源集团", "440000", "广州市", "分拣打包中心", ["1", "6"], 31.0, "珠三角集散中心"),
+    ("E006", "东莞纸源回收有限公司", "440000", "东莞市", "贸易商", ["1", "8"], 12.6, "跨市调货，价格敏感"),
+    ("E007", "玖龙纸业（东莞）原料部", "440000", "东莞市", "造纸企业", ["1"], 55.0, "箱板纸原料，量大"),
+    ("E008", "深圳南山办公废纸回收点", "440000", "深圳市", "回收站点", ["6", "5"], 1.8, "写字楼集中区，白度高"),
+    ("E009", "豫中再生资源产业园", "410000", "郑州市", "分拣打包中心", ["1", "8"], 22.0, "园区化运营"),
+    ("E010", "洛阳纸品回收站", "410000", "洛阳市", "回收站点", ["1", "8"], 1.5, "城区前端回收"),
+    ("E011", "赣鑫废纸贸易有限公司", "360000", "南昌市", "贸易商", ["1", "3"], 14.2, "向浙闽调货"),
+    ("E012", "江西理文造纸原料公司", "360000", "九江市", "造纸企业", ["1", "2"], 38.0, "沿江布局，水运成本低"),
+    ("E013", "浙北废纸分拣中心", "330000", "湖州市", "分拣打包中心", ["1", "2", "3"], 19.8, "包装纸产业带配套"),
+    ("E014", "宁波港废纸集散中心", "330000", "宁波市", "贸易商", ["1", "8"], 16.4, "进口替代后的内贸枢纽"),
+    ("E015", "苏南再生资源有限公司", "320000", "苏州市", "分拣打包中心", ["1", "6"], 21.5, "电子制造业办公废纸多"),
+    ("E016", "南京城北回收站点", "320000", "南京市", "回收站点", ["8", "5"], 1.2, "社区混合废纸"),
+    ("E017", "鄂中废纸回收中心", "420000", "武汉市", "分拣打包中心", ["1", "8"], 13.7, "九省通衢，调货便利"),
+    ("E018", "川渝纸业原料公司", "510000", "成都市", "造纸企业", ["1", "5"], 17.3, "西南区域龙头"),
+    ("E019", "重庆两江回收站", "500000", "重庆市", "回收站点", ["1", "8"], 2.1, "城区前端"),
+    ("E020", "闽南废纸贸易商行", "350000", "厦门市", "贸易商", ["1", "3"], 9.6, "对台贸易通道"),
+    ("E021", "皖江再生资源中心", "340000", "芜湖市", "分拣打包中心", ["1", "2"], 11.2, "沿江造纸带配套"),
+    ("E022", "桂南废纸回收站", "450000", "南宁市", "回收站点", ["1", "8"], 1.6, "县域覆盖"),
+    ("E023", "京津冀再生资源集散中心", "110000", "北京市", "分拣打包中心", ["6", "5", "2"], 8.4, "办公与书刊废纸为主"),
+    ("E024", "津沽废纸分拣厂", "120000", "天津市", "分拣打包中心", ["1", "8"], 7.9, "港口与制造业配套"),
+    ("E025", "湘江纸品回收有限公司", "430000", "长沙市", "贸易商", ["1", "5"], 6.3, "向鄂赣调货"),
+    ("E026", "黔中再生资源站点", "520000", "贵阳市", "回收站点", ["1", "8"], 1.1, "城区前端"),
+    ("E027", "陕再生资源打包中心", "610000", "西安市", "分拣打包中心", ["1", "8"], 5.8, "西北集散"),
+    ("E028", "沪上办公废纸回收中心", "310000", "上海市", "分拣打包中心", ["6", "5"], 9.1, "写字楼白领区，白度高"),
+    ("E029", "辽沈废纸回收站", "210000", "沈阳市", "回收站点", ["1", "8"], 1.4, "老工业区"),
+    ("E030", "滇中纸品贸易公司", "530000", "昆明市", "贸易商", ["1", "3"], 4.2, "面向东南亚边贸"),
+]
+
+CATEGORY_NAMES: Dict[str, str] = {
+    "1": "废瓦楞纸箱类", "2": "废纸盒及废卡纸类", "3": "包装废纸类",
+    "4": "废新闻纸类", "5": "废书刊杂志类", "6": "办公废纸类",
+    "7": "特种废纸类", "8": "混合废纸类",
+}
+
+DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "enterprises.csv"
+
+
+def _jitter(seed: str, span: float) -> float:
+    return (zlib.crc32(seed.encode("utf-8")) % 1000 / 1000.0 - 0.5) * 2 * span
+
+
+def _make(seed: tuple, is_demo: bool = True) -> Dict[str, object]:
+    eid, name, pcode, city, etype, cats, volume, note = seed
+    lat0, lon0 = PROVINCE_CENTROID.get(pcode, (35.0, 110.0))
+    return {
+        "id": eid,
+        "name": name,
+        "province_code": pcode,
+        "city": city,
+        "type": etype,
+        "categories": list(cats),
+        "category_names": [CATEGORY_NAMES.get(c, c) for c in cats],
+        "volume": float(volume),
+        "lat": round(lat0 + _jitter(eid + "lat", 1.6), 3),
+        "lon": round(lon0 + _jitter(eid + "lon", 2.2), 3),
+        "note": note,
+        "is_demo": is_demo,
+    }
+
+
+def _load_csv(path: Path) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    with path.open(encoding="utf-8-sig", newline="") as fh:
+        for raw in csv.DictReader(fh):
+            cats = [c.strip() for c in str(raw.get("categories", "")).replace("|", ";").split(";") if c.strip()]
+            try:
+                volume = float(raw.get("volume") or 0)
+            except ValueError:
+                volume = 0.0
+            rows.append({
+                "id": raw.get("id") or f"CSV{len(rows) + 1}",
+                "name": raw.get("name") or "",
+                "province_code": raw.get("province_code") or "",
+                "city": raw.get("city") or "",
+                "type": raw.get("type") or "分拣打包中心",
+                "categories": cats,
+                "category_names": [CATEGORY_NAMES.get(c, c) for c in cats],
+                "volume": volume,
+                "lat": float(raw.get("lat") or 0) or None,
+                "lon": float(raw.get("lon") or 0) or None,
+                "note": raw.get("note") or "",
+                "is_demo": False,
+            })
+    return rows
+
+
+def _build() -> List[Dict[str, object]]:
+    if DATA_FILE.exists():
+        loaded = _load_csv(DATA_FILE)
+        if loaded:
+            return loaded
+    return [_make(s) for s in ENTERPRISE_SEEDS]
+
+
+ENTERPRISES: List[Dict[str, object]] = _build()
+IS_DEMO = all(e["is_demo"] for e in ENTERPRISES) if ENTERPRISES else True
+
+
+def list_enterprises(province: Optional[str] = None,
+                     category: Optional[str] = None,
+                     etype: Optional[str] = None) -> List[Dict[str, object]]:
+    """按省 / 大类 / 类型筛选企业，按年回收量降序。"""
+    rows = ENTERPRISES
+    if province:
+        rows = [e for e in rows if e["province_code"] == province]
+    if category:
+        rows = [e for e in rows if category in e["categories"]]  # type: ignore[operator]
+    if etype:
+        rows = [e for e in rows if e["type"] == etype]
+    return sorted(rows, key=lambda e: float(e["volume"]), reverse=True)  # type: ignore[arg-type]
+
+
+def by_province(province: Optional[str] = None) -> List[Dict[str, object]]:
+    """按省汇总：企业数、年回收量、平均单企规模、主要品类。"""
+    rows = list_enterprises(province)
+    bucket: Dict[str, Dict[str, object]] = {}
+    for e in rows:
+        code = str(e["province_code"])
+        item = bucket.setdefault(code, {
+            "province_code": code,
+            "count": 0,
+            "volume": 0.0,
+            "types": {},
+            "categories": {},
+        })
+        item["count"] = int(item["count"]) + 1  # type: ignore[arg-type]
+        item["volume"] = float(item["volume"]) + float(e["volume"])  # type: ignore[arg-type]
+        item["types"][e["type"]] = int(item["types"].get(e["type"], 0)) + 1  # type: ignore[index]
+        for c in e["categories"]:  # type: ignore[union-attr]
+            item["categories"][c] = float(item["categories"].get(c, 0)) + float(e["volume"])  # type: ignore[index]
+
+    out: List[Dict[str, object]] = []
+    for code, item in bucket.items():
+        top = max(item["categories"].items(), key=lambda kv: kv[1])[0] if item["categories"] else None  # type: ignore[union-attr]
+        count = int(item["count"])  # type: ignore[arg-type]
+        volume = round(float(item["volume"]), 1)  # type: ignore[arg-type]
+        out.append({
+            "province_code": code,
+            "count": count,
+            "volume": volume,
+            "avg_volume": round(volume / count, 2) if count else 0.0,
+            "top_category": top,
+            "top_category_name": CATEGORY_NAMES.get(str(top), "—"),
+        })
+    return sorted(out, key=lambda r: float(r["volume"]), reverse=True)  # type: ignore[arg-type]
+
+
+def by_category(province: Optional[str] = None) -> List[Dict[str, object]]:
+    """按大类汇总企业数量与年回收量（同一企业涉及多类时分别计入）。"""
+    bucket: Dict[str, Dict[str, float]] = {c: {"count": 0.0, "volume": 0.0} for c in CATEGORY_NAMES}
+    for e in list_enterprises(province):
+        for c in e["categories"]:  # type: ignore[union-attr]
+            if c in bucket:
+                bucket[c]["count"] += 1
+                bucket[c]["volume"] += float(e["volume"])
+    return [
+        {
+            "code": c,
+            "name": CATEGORY_NAMES[c],
+            "count": int(v["count"]),
+            "volume": round(v["volume"], 1),
+        }
+        for c, v in sorted(bucket.items())
+    ]
+
+
+def by_type(province: Optional[str] = None) -> List[Dict[str, object]]:
+    bucket: Dict[str, Dict[str, float]] = {t: {"count": 0.0, "volume": 0.0} for t in TYPES}
+    for e in list_enterprises(province):
+        t = str(e["type"])
+        bucket.setdefault(t, {"count": 0.0, "volume": 0.0})
+        bucket[t]["count"] += 1
+        bucket[t]["volume"] += float(e["volume"])
+    return [
+        {"type": t, "desc": TYPE_DESC.get(t, ""), "count": int(v["count"]),
+         "volume": round(v["volume"], 1)}
+        for t, v in bucket.items()
+    ]
+
+
+def totals() -> Dict[str, object]:
+    volume = sum(float(e["volume"]) for e in ENTERPRISES)
+    return {
+        "count": len(ENTERPRISES),
+        "volume": round(volume, 1),
+        "provinces": len({e["province_code"] for e in ENTERPRISES}),
+        "is_demo": IS_DEMO,
+    }
+
+
+_GENERIC = {"废纸", "回收", "废纸回收", "回收站", "公司", "企业", "造纸",
+            "纸厂", "中心", "站点", "分拣", "打包"}
+
+
+def find(name: str) -> Optional[Dict[str, object]]:
+    """按企业名查找，支持部分匹配。
+
+    太短或太通用的词（「废纸」「回收」）不参与匹配，避免把普通提问误判成企业查询。
+    """
+    text = (name or "").strip()
+    if len(text) < 3 or text in _GENERIC:
+        return None
+    for e in ENTERPRISES:
+        if str(e["name"]) == text:
+            return e
+    for e in ENTERPRISES:
+        n = str(e["name"])
+        if text in n:
+            return e
+    return None
+
+
+def summary(province: Optional[str] = None) -> str:
+    """对话助手使用的企业维度摘要。"""
+    from . import regions
+
+    prov_name = "全国"
+    if province:
+        node = regions.get_node(province)
+        prov_name = str(node["name"]) if node else province
+
+    rows = by_province(province)
+    if not rows:
+        return f"【{prov_name}】暂无企业名录数据。"
+
+    total_v = round(sum(float(r["volume"]) for r in rows), 1)
+    total_c = sum(int(r["count"]) for r in rows)
+    lines = [f"【{prov_name}回收企业概览】"]
+    if IS_DEMO:
+        lines.append("注：以下为示例企业名录（虚构名称），用于演示企业维度，可在 data/enterprises.csv 替换为真实名录。")
+    lines.append(f"- 收录企业 {total_c} 家，年回收量合计 {total_v} 万吨")
+
+    if province:
+        node = regions.get_node(province)
+        if node:
+            prov_total = float(node["stats"]["回收量(万吨)"])  # type: ignore[index]
+            lines.append(
+                f"- 占该省官方回收量（{prov_total} 万吨）的 "
+                f"{round(total_v / prov_total * 100, 1) if prov_total else 0}%（名录覆盖率）"
+            )
+
+    lines.append("")
+    lines.append("按类型：")
+    for t in by_type(province):
+        if t["count"]:
+            lines.append(f"- {t['type']}：{t['count']} 家，{t['volume']} 万吨 —— {t['desc']}")
+
+    lines.append("")
+    lines.append("按大类（同一企业涉及多类分别计入）：")
+    for c in by_category(province):
+        if c["count"]:
+            lines.append(f"- {c['code']} {c['name']}：{c['count']} 家，{c['volume']} 万吨")
+
+    top = list_enterprises(province)[:5]
+    if top:
+        lines.append("")
+        lines.append("年回收量前五：")
+        for e in top:
+            lines.append(
+                f"  {e['name']}（{e['city']}·{e['type']}）{e['volume']} 万吨，"
+                f"主营 {'、'.join(e['category_names'])}"
+            )
+    return "\n".join(lines)
+```
+
+### `src/paper_recycle_agent/exporter.py`（250 行）
 
 ```python
 """Excel 导出：面向统计局/行业协会的多表工作簿。
@@ -454,7 +832,8 @@ def summary_text() -> str:
 2. 分类回收   —— 按 GB/T 20811-2018 八大类拆分的回收量与估算货值（可选年份/区域）
 3. 历年回收   —— 2014—2025 年回收量、消费量、回收率、利用率
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
-5. 数据说明   —— 数据来源、口径与「官方 / 测算」区分，供复核
+5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
+6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
 """
 
 from io import BytesIO
@@ -464,7 +843,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from . import regions
+from . import enterprises, regions
 from . import stats as stats_mod
 
 HEADER_FILL = PatternFill("solid", fgColor="2F7D4F")
@@ -627,10 +1006,36 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "2021-01-01《关于全面禁止进口固体废物有关事项的公告》施行后，废纸进口清零。",
     )
 
-    # ---- 5. 数据说明 ----
-    ws5 = wb.create_sheet("数据说明")
-    ws5.append(["数据来源与口径说明"])
-    ws5.cell(row=1, column=1).font = TITLE_FONT
+    # ---- 5. 企业名录 ----
+    ws5 = wb.create_sheet("企业名录")
+    prov = None if is_national else node_code
+    ent_rows = []
+    for e in enterprises.list_enterprises(prov):
+        ent_rows.append([
+            e["name"], e["city"], e["type"],
+            "、".join(e["category_names"]),
+            e["volume"], e["lat"], e["lon"], e["note"],
+            "示例" if e["is_demo"] else "真实",
+        ])
+    ent_rows.append([
+        "合计", "", "", "",
+        round(sum(float(e["volume"]) for e in enterprises.list_enterprises(prov)), 1),
+        "", "", "", "",
+    ])
+    _write_sheet(
+        ws5, f"{scope_name} 回收企业名录",
+        ["企业名称", "城市", "类型", "主营大类", "年回收量(万吨)",
+         "纬度", "经度", "备注", "数据性质"],
+        ent_rows,
+        [30, 12, 16, 34, 16, 10, 10, 34, 10],
+        "企业维度用于回答「某个地方的量由谁在做、分布在哪些城市、各品类由哪类企业消化」。"
+        "内置名录为示例数据（虚构名称），可在项目根目录放 data/enterprises.csv 覆盖。",
+    )
+
+    # ---- 6. 数据说明 ----
+    ws6 = wb.create_sheet("数据说明")
+    ws6.append(["数据来源与口径说明"])
+    ws6.cell(row=1, column=1).font = TITLE_FONT
     lines = [
         "一、数据来源",
         *[f"  · {s}" for s in stats_mod.SOURCES],
@@ -639,6 +1044,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 官方：中国造纸协会年度报告公布值，可直接引用。",
         "  · 公开报道：省级回收量来自行业研究机构公开报道。",
         "  · 梯队测算 / 估算：按行业分区梯队或结构占比推算，仅供结构参考，不可作为统计公报数据。",
+        "  · 示例：企业名录为演示用虚构数据，需替换为真实名录后使用。",
         "",
         "三、已知口径差异",
         "  · 2024 年全国废纸回收量：中国造纸协会年度报告 6971 万吨；"
@@ -646,18 +1052,20 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 部分年份（2015、2017、2018）废纸消费量/利用率未在公开年报中单列，故留空。",
         "",
         "四、层级范围",
-        "  · 本工具只提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
+        "  · 本工具提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
+        "  · 企业名录带城市与经纬度，可在省级以下提供更细的空间视角，但企业样本不代表全量。",
         "",
         "五、替换为真实数据",
         "  · 省级：修改 src/paper_recycle_agent/regions.py 的 SEEDS，为省份填入 reported 值。",
         "  · 历年：修改 src/paper_recycle_agent/stats.py 的 HISTORY。",
         "  · 分类占比：修改 CATEGORY_SHARES 的锚点年份数值。",
+        "  · 企业名录：在项目根目录放 data/enterprises.csv（表头见 enterprises.CSV_FIELDS）。",
     ]
     for line in lines:
-        ws5.append([line])
-    ws5.column_dimensions["A"].width = 110
-    for r in range(2, ws5.max_row + 1):
-        ws5.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
+        ws6.append([line])
+    ws6.column_dimensions["A"].width = 110
+    for r in range(2, ws6.max_row + 1):
+        ws6.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
 
     buf = BytesIO()
     wb.save(buf)
@@ -825,7 +1233,7 @@ def estimate(text: str, weight_kg: float) -> Dict[str, object]:
     }
 ```
 
-### `src/paper_recycle_agent/regions.py`（305 行）
+### `src/paper_recycle_agent/regions.py`（326 行）
 
 ```python
 """区域统计：全国 → 省级（仅两级）。
@@ -1053,20 +1461,41 @@ def breadcrumb(code: str) -> List[Dict[str, str]]:
     return list(reversed(path))
 
 
+_SUFFIXES = ("壮族自治区", "回族自治区", "维吾尔自治区", "特别行政区", "自治区", "省", "市")
+
+
+def _short_name(name: str) -> str:
+    """「山东省」→「山东」，「广西壮族自治区」→「广西」，「中国香港」→「香港」。"""
+    text = name[2:] if name.startswith("中国") else name
+    for suf in _SUFFIXES:
+        if text.endswith(suf) and len(text) > len(suf):
+            return text[: -len(suf)]
+    return text
+
+
+# 简称 -> 节点，供「山东有哪些企业」这类自然语言命中
+_ALIAS: Dict[str, Dict[str, object]] = {}
+for _node in _INDEX.values():
+    _ALIAS.setdefault(str(_node["name"]), _node)
+    _ALIAS.setdefault(_short_name(str(_node["name"])), _node)
+
+
 def find(name: str) -> Optional[Dict[str, object]]:
-    """按名称查找区域：先精确匹配，再包含匹配（支持「山东」匹配「山东省」）。"""
+    """按名称查找区域：支持全称、简称，以及嵌在自然语言里的省名。
+
+    「山东」「山东省」「山东有哪些回收企业」都会命中山东省。
+    """
     if not name:
         return None
     text = str(name).strip()
     if text in {"全国", "中国", "国家", "cn", "CN"}:
         return ROOT
-    for node in _INDEX.values():
-        if node["name"] == text:
-            return node
-    for node in _INDEX.values():
-        n = str(node["name"])
-        if len(text) >= 2 and n and (text in n or n in text):
-            return node
+    if text in _ALIAS:
+        return _ALIAS[text]
+    # 长别名优先，避免「海南」先被「海」之类的短串抢走
+    for alias in sorted(_ALIAS, key=len, reverse=True):
+        if len(alias) >= 2 and alias in text:
+            return _ALIAS[alias]
     return None
 
 
@@ -1381,7 +1810,7 @@ SOURCES: List[str] = [
 
 ## 二、Web 应用（app/）
 
-### `app/server.py`（183 行）
+### `app/server.py`（205 行）
 
 ```python
 """FastAPI 服务：废纸回收 Agent 的图形界面与对话接口。
@@ -1406,7 +1835,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import exporter, regions, respond
+from paper_recycle_agent import enterprises, exporter, regions, respond
 from paper_recycle_agent import stats as stats_mod
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -1461,6 +1890,28 @@ def info() -> dict:
         "national_year": regions.NATIONAL_YEAR,
         "latest_year": stats_mod.LATEST_YEAR,
         "tiers": regions.TIER_LABEL,
+        "enterprise_types": enterprises.TYPES,
+        "enterprise_is_demo": enterprises.IS_DEMO,
+    }
+
+
+@app.get("/api/enterprises")
+def enterprise_list(province: Optional[str] = None,
+                    category: Optional[str] = None,
+                    type: Optional[str] = None) -> dict:
+    """企业维度：名录 + 按省 / 按大类 / 按类型汇总。"""
+    code = province if province else None
+    rows = enterprises.list_enterprises(code, category, type)
+    return {
+        "is_demo": enterprises.IS_DEMO,
+        "totals": enterprises.totals(),
+        "list": rows,
+        "by_province": enterprises.by_province(code),
+        "by_category": enterprises.by_category(code),
+        "by_type": enterprises.by_type(code),
+        "types": enterprises.TYPES,
+        "type_desc": enterprises.TYPE_DESC,
+        "filter": {"province": code, "category": category, "type": type},
     }
 
 
@@ -1569,7 +2020,7 @@ def spa_fallback(full_path: str) -> Response:
     return _index_html()
 ```
 
-### `app/static/index.html`（548 行）
+### `app/static/index.html`（792 行）
 
 ```html
 <!DOCTYPE html>
@@ -1615,7 +2066,13 @@ def spa_fallback(full_path: str) -> Response:
   .inputbar button:disabled { opacity: .5; cursor: default; }
   #micBtn { background: #fff; color: var(--brand); border: 1px solid var(--border); width: 40px; padding: 0; font-size: 17px; }
   #micBtn.listening { background: #fde8e8; border-color: #f5b5b5; animation: pulse 1s infinite; }
+  #micBtn:disabled { opacity: .4; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(220,80,80,.4);} 70%{box-shadow:0 0 0 10px rgba(220,80,80,0);} 100%{box-shadow:0 0 0 0 rgba(220,80,80,0);} }
+  .voice-status { display: none; padding: 0 16px 10px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+  .voice-status.show { display: block; }
+  .voice-status.info { color: var(--brand); }
+  .voice-status.err { color: #b42318; background: #fef3f2; border-top: 1px solid #fecdca; padding: 8px 16px; }
+  .voice-status.ok { color: var(--brand); }
 
   /* ---------- 右：统计面板 ---------- */
   .side { width: 500px; border-left: 1px solid var(--border); background: var(--panel);
@@ -1691,18 +2148,19 @@ def spa_fallback(full_path: str) -> Response:
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.3.0 · 全国+省级统计 · 历年数据 · 八大类分类 · 语音输入 · 多表 Excel</span>
+  <span class="sub">v1.4.0 · 全国+省级统计 · 历年 · 八大类 · 企业分布 · 语音输入 · 多表 Excel</span>
 </header>
 <div class="layout">
   <div class="chat">
     <div class="messages" id="messages"></div>
     <div class="chips" id="chips"></div>
     <div class="inputbar">
-      <button id="micBtn" title="语音输入（需 Chrome / Edge）">🎤</button>
+      <button id="micBtn" title="语音输入（Chrome / Edge，需 HTTPS 与麦克风权限）">🎤</button>
       <input id="input" placeholder="说或输入：纸箱 2kg / 山东省回收量 / 2020年分类数据 / 历年趋势"
              onkeydown="if(event.key==='Enter')send()" />
       <button id="sendBtn" onclick="send()">发送</button>
     </div>
+    <div class="voice-status" id="voiceStatus"></div>
   </div>
 
   <aside class="side">
@@ -1710,6 +2168,7 @@ def spa_fallback(full_path: str) -> Response:
       <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
+      <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
     </div>
 
     <!-- 区域统计 -->
@@ -1801,6 +2260,43 @@ def spa_fallback(full_path: str) -> Response:
         <div id="standardsBody"></div>
       </details>
     </section>
+
+    <!-- 企业分布 -->
+    <section class="pane" id="pane-enterprise">
+      <div class="yearbar" style="flex-wrap:wrap">
+        <span>省份</span>
+        <select id="entProv" onchange="loadEnterprises()"></select>
+        <span>大类</span>
+        <select id="entCat" onchange="loadEnterprises()"></select>
+        <span>类型</span>
+        <select id="entType" onchange="loadEnterprises()"></select>
+      </div>
+      <div class="notice" id="entNotice"></div>
+      <div class="sect-title">
+        <span>企业地理分布（示意图）</span>
+        <span class="hintline" id="entTotal"></span>
+      </div>
+      <div class="chart" style="padding:4px">
+        <svg id="entMap" viewBox="0 0 480 300" style="width:100%;height:300px;display:block"></svg>
+      </div>
+      <div class="sect-title"><span>按类型</span><span class="hintline">点数量与量级</span></div>
+      <div class="chart" id="entTypeChart"></div>
+      <div class="sect-title"><span>企业明细</span><span class="hintline">按年回收量降序</span></div>
+      <div class="scroll" style="max-height:260px">
+        <table id="entTable">
+          <thead>
+            <tr>
+              <th>企业</th><th>城市</th><th>类型</th>
+              <th class="num">年回收量(万吨)</th><th>主营</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button onclick="exportExcel()">导出 Excel（含企业名录）</button>
+      </div>
+    </section>
   </aside>
 </div>
 
@@ -1861,6 +2357,7 @@ def spa_fallback(full_path: str) -> Response:
     document.querySelectorAll(".pane").forEach(p => {
       p.classList.toggle("active", p.id === "pane-" + name);
     });
+    if (name === "enterprise") loadEnterprises();
   }
 
   /* ---------------- 区域 ---------------- */
@@ -2014,6 +2511,7 @@ def spa_fallback(full_path: str) -> Response:
       renderProvTable(data.children);
       renderHistory(data.history, data.scope);
       renderCategory(data.categories, data.base_tonnage, data.node.name);
+      initEntFilters();
       const back = document.getElementById("backBtn");
       back.textContent = data.scope === "national" ? "已在最上级" : "返回全国";
       back.disabled = data.scope === "national";
@@ -2039,6 +2537,127 @@ def spa_fallback(full_path: str) -> Response:
 
   function goBack() {
     loadStats("CN", state.year);
+  }
+
+  /* ---------------- 企业分布 ---------------- */
+  const ENT_COLORS = {
+    "回收站点": "#8fbfa3",
+    "分拣打包中心": "#4a9d6b",
+    "造纸企业": "#1f5c3a",
+    "贸易商": "#b7a06a"
+  };
+  let entReady = false;
+
+  function initEntFilters() {
+    if (entReady || !state.data) return;
+    entReady = true;
+    const provSel = document.getElementById("entProv");
+    provSel.innerHTML = `<option value="">全部省份</option>` +
+      state.data.children.map(c => `<option value="${c.code}">${c.name}</option>`).join("");
+    const catSel = document.getElementById("entCat");
+    catSel.innerHTML = `<option value="">全部大类</option>` +
+      state.data.categories.map(c => `<option value="${c.code}">${c.code} ${c.name}</option>`).join("");
+    const typeSel = document.getElementById("entType");
+    typeSel.innerHTML = `<option value="">全部类型</option>` +
+      Object.keys(ENT_COLORS).map(t => `<option value="${t}">${t}</option>`).join("");
+  }
+
+  async function loadEnterprises() {
+    initEntFilters();
+    const prov = document.getElementById("entProv").value;
+    const cat = document.getElementById("entCat").value;
+    const typ = document.getElementById("entType").value;
+    const q = new URLSearchParams();
+    if (prov) q.set("province", prov);
+    if (cat) q.set("category", cat);
+    if (typ) q.set("type", typ);
+    try {
+      const res = await fetch("/api/enterprises?" + q.toString());
+      const d = await res.json();
+      renderEntNotice(d);
+      renderEntMap(d.list);
+      renderEntTypeChart(d.by_type);
+      renderEntTable(d.list);
+      const v = d.list.reduce((s, e) => s + e.volume, 0);
+      document.getElementById("entTotal").textContent =
+        `${d.list.length} 家 · 合计 ${v.toFixed(1)} 万吨`;
+    } catch (e) {
+      document.getElementById("entNotice").textContent = "企业数据加载失败：" + e;
+    }
+  }
+
+  function renderEntNotice(d) {
+    const el = document.getElementById("entNotice");
+    if (d.is_demo) {
+      el.innerHTML = `当前为<b>示例企业名录</b>（名称为虚构），用于演示「企业 × 地理位置 × 品类」分析。
+        在项目根目录放 <code>data/enterprises.csv</code> 即可替换为真实名录，页面自动切换为真实数据。`;
+    } else {
+      el.innerHTML = `当前加载的是<b>自有企业名录</b>（data/enterprises.csv），共 ${d.totals.count} 家。`;
+    }
+  }
+
+  function renderEntMap(list) {
+    const svg = document.getElementById("entMap");
+    if (!list.length) {
+      svg.innerHTML = `<text x="240" y="150" text-anchor="middle" fill="#6b7280" font-size="12">当前筛选没有企业</text>`;
+      return;
+    }
+    const X = lon => 22 + (lon - 73) / (135 - 73) * 436;
+    const Y = lat => 14 + (54 - lat) / (54 - 18) * 272;
+    const maxV = Math.max(...list.map(e => e.volume));
+    let out = `<rect x="1" y="1" width="478" height="298" fill="#fbfcfd" stroke="#e5e7eb" rx="6"/>`;
+    // 参考网格
+    for (let lon = 80; lon <= 130; lon += 10) {
+      out += `<line x1="${X(lon)}" y1="14" x2="${X(lon)}" y2="286" stroke="#eef1f4"/>`;
+      out += `<text x="${X(lon)}" y="296" font-size="9" fill="#9aa3af" text-anchor="middle">${lon}°E</text>`;
+    }
+    for (let lat = 20; lat <= 50; lat += 10) {
+      out += `<line x1="22" y1="${Y(lat)}" x2="458" y2="${Y(lat)}" stroke="#eef1f4"/>`;
+      out += `<text x="2" y="${Y(lat) + 3}" font-size="9" fill="#9aa3af">${lat}°N</text>`;
+    }
+    list.forEach(e => {
+      const r = 3 + Math.sqrt(e.volume / maxV) * 9;
+      const color = ENT_COLORS[e.type] || "#4a9d6b";
+      out += `<circle cx="${X(e.lon).toFixed(1)}" cy="${Y(e.lat).toFixed(1)}" r="${r.toFixed(1)}"
+                fill="${color}" fill-opacity="0.72" stroke="#ffffff" stroke-width="1">
+                <title>${e.name}\n${e.city} · ${e.type}\n年回收量 ${e.volume} 万吨\n主营 ${e.category_names.join("、")}</title>
+              </circle>`;
+    });
+    // 图例
+    let lx = 30;
+    Object.keys(ENT_COLORS).forEach(t => {
+      out += `<circle cx="${lx}" cy="10" r="3.5" fill="${ENT_COLORS[t]}"/>`;
+      out += `<text x="${lx + 7}" y="13" font-size="9" fill="#6b7280">${t}</text>`;
+      lx += 78;
+    });
+    svg.innerHTML = out;
+  }
+
+  function renderEntTypeChart(byType) {
+    const rows = byType.filter(t => t.count > 0);
+    const max = Math.max(...rows.map(t => t.volume), 1);
+    document.getElementById("entTypeChart").innerHTML = rows.map(t =>
+      `<div class="rowc" style="grid-template-columns:96px 1fr 74px">
+         <div class="lbl">${t.type}</div>
+         <div class="track"><div class="fill" style="width:${(t.volume / max * 100).toFixed(1)}%;background:${ENT_COLORS[t.type] || "#4a9d6b"}"></div></div>
+         <div class="val">${t.count}家 / ${t.volume}</div>
+       </div>`).join("");
+  }
+
+  function renderEntTable(list) {
+    const tb = document.querySelector("#entTable tbody");
+    if (!list.length) {
+      tb.innerHTML = `<tr><td colspan="5" class="empty">当前筛选没有企业</td></tr>`;
+      return;
+    }
+    tb.innerHTML = list.map(e =>
+      `<tr title="${e.note}">
+         <td>${e.name}</td>
+         <td>${e.city}</td>
+         <td>${e.type}</td>
+         <td class="num">${e.volume}</td>
+         <td>${e.category_names.join("、")}</td>
+       </tr>`).join("");
   }
 
   /* ---------------- Excel 导出 ---------------- */
@@ -2090,31 +2709,107 @@ def spa_fallback(full_path: str) -> Response:
     } catch (e) { /* ignore */ }
   }
 
-  /* ---------------- 语音输入 ---------------- */
+  /* ---------------- 语音输入 ----------------
+     浏览器 Web Speech API 的失败点很多，而且 onerror 默认是静默的，
+     用户只会看到「按了没反应」。这里把每个失败原因都翻译成人话并显示出来。
+  */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const voiceEl = document.getElementById("voiceStatus");
   let recog = null;
+  let voiceDone = false;
+
+  function voiceMsg(text, kind) {
+    voiceEl.textContent = text || "";
+    voiceEl.className = "voice-status" + (text ? " show " + (kind || "info") : "");
+  }
+
+  const VOICE_ERRORS = {
+    "not-allowed": "麦克风权限被拒绝。点地址栏左侧的锁/摄像头图标 → 把「麦克风」改为允许，再刷新页面。",
+    "service-not-allowed": "浏览器禁用了语音识别服务（可能被企业策略或安全软件拦截）。请改用文字输入。",
+    "audio-capture": "没有检测到麦克风。请检查麦克风是否插好、系统里是否被静音。",
+    "network": "语音识别服务连接失败。Chrome 的识别服务在部分网络环境下不可用，请改用文字输入。",
+    "no-speech": "没有听到声音。请靠近麦克风，看到「正在听…」后再说话。",
+    "aborted": "语音输入已取消。",
+    "language-not-supported": "当前浏览器不支持中文语音识别。",
+    "bad-grammar": "识别语法错误，请重试。"
+  };
+
+  // 启动前先体检，把「注定失败」的情况直接说清楚，而不是让用户按了没反应
+  function voicePreflight() {
+    if (window.self !== window.top) {
+      return "当前页面嵌在预览框里，浏览器一般会屏蔽麦克风。请点右上角「在浏览器中打开」后重试，或直接用文字输入。";
+    }
+    if (!window.isSecureContext) {
+      return "语音输入要求 HTTPS 或 localhost 环境，当前地址不满足，浏览器会直接拒绝麦克风。";
+    }
+    if (!SR) {
+      return "当前浏览器不支持语音识别。请用 Chrome 或 Edge（Firefox / 部分 Safari 不支持）。";
+    }
+    return null;
+  }
+
   if (SR) {
     recog = new SR();
     recog.lang = "zh-CN";
-    recog.interimResults = false;
+    recog.continuous = false;
+    recog.interimResults = true;   // 先出临时结果，让用户看到「确实在识别」
     recog.maxAlternatives = 1;
-    recog.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      inputEl.value = text;
-      send();
+
+    recog.onstart = () => {
+      voiceDone = false;
+      voiceMsg("正在听…请说话（说完会自动结束）", "info");
     };
-    recog.onerror = () => micBtn.classList.remove("listening");
-    recog.onend = () => micBtn.classList.remove("listening");
+    recog.onresult = (e) => {
+      let interim = "", final = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (interim) inputEl.value = interim;          // 实时回显，证明麦克风在工作
+      if (final) {
+        voiceDone = true;
+        inputEl.value = final;
+        voiceMsg("识别完成：" + final, "ok");
+        send();
+      }
+    };
+    recog.onerror = (ev) => {
+      const code = ev.error || "unknown";
+      voiceMsg("语音输入失败（" + code + "）：" + (VOICE_ERRORS[code] || "未知错误，请改用文字输入。"), "err");
+      micBtn.classList.remove("listening");
+    };
+    recog.onend = () => {
+      micBtn.classList.remove("listening");
+      micBtn.disabled = false;
+      if (!voiceDone && voiceEl.className.indexOf("err") === -1) {
+        voiceMsg("没有识别到内容，可以再说一次，或直接打字。", "info");
+      }
+    };
   }
+
   micBtn.onclick = () => {
-    if (!recog) { alert("当前浏览器不支持语音输入，请用 Chrome / Edge 打开。"); return; }
+    const block = voicePreflight();
+    if (block) { voiceMsg(block, "err"); return; }
+    if (micBtn.classList.contains("listening")) {   // 再点一次 = 停止
+      try { recog.stop(); } catch (e) {}
+      return;
+    }
     micBtn.classList.add("listening");
-    try { recog.start(); } catch (e) { recog.stop(); }
+    micBtn.disabled = true;
+    setTimeout(() => { micBtn.disabled = false; }, 600);
+    try {
+      recog.start();
+    } catch (e) {
+      // 上一次还没结束就再次 start() 会抛 InvalidStateError
+      micBtn.classList.remove("listening");
+      voiceMsg("识别会话还没结束，请稍等一秒再按一次。", "err");
+    }
   };
 
   addMsg("你好，我是废纸回收助手 🪨\n" +
-         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量。\n" +
-         "右侧三个标签页分别是「区域统计」「历年数据」「分类结构」，都可导出 Excel。", "bot");
+         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量、某省有哪些回收企业。\n" +
+         "右侧四个标签页：区域统计 / 历年数据 / 分类结构 / 企业分布，都可导出 Excel。\n" +
+         "语音输入若不可用，页面输入框下方会直接告诉你原因。", "bot");
   loadStats("CN", 2024);
   loadInfo();
 </script>
@@ -2124,7 +2819,7 @@ def spa_fallback(full_path: str) -> Response:
 
 ## 三、测试（tests/）
 
-### `tests/test_agent.py`（72 行）
+### `tests/test_agent.py`（100 行）
 
 ```python
 from paper_recycle_agent import agent
@@ -2199,6 +2894,34 @@ def test_no_city_data_claim():
     """市级数据已下线，助手不应再声称能查市县。"""
     out = agent.respond("帮助")
     assert "仅全国与省级" in out
+
+
+def test_respond_enterprise_national():
+    out = agent.respond("企业名录")
+    assert "回收企业概览" in out
+    assert "示例" in out
+
+
+def test_respond_enterprise_by_province():
+    out = agent.respond("山东有哪些回收企业")
+    assert "山东" in out
+    assert "名录覆盖率" in out
+
+
+def test_respond_enterprise_by_name():
+    out = agent.respond("鲁清再生")
+    assert "鲁清再生资源有限公司" in out
+    assert "济南市" in out
+
+
+def test_respond_enterprise_type():
+    out = agent.respond("分拣中心")
+    assert "分拣打包中心" in out
+
+
+def test_help_mentions_enterprise():
+    out = agent.respond("帮助")
+    assert "企业名录" in out
 ```
 
 ### `tests/test_classifier.py`（29 行）
@@ -2264,7 +2987,111 @@ def test_quality_rules_present():
     assert "水分" in data.QUALITY_RULES
 ```
 
-### `tests/test_exporter.py`（80 行）
+### `tests/test_enterprises.py`（99 行）
+
+```python
+"""企业维度测试：名录、按省/按类/按类型汇总、覆盖率与对话摘要。"""
+
+from paper_recycle_agent import enterprises, regions
+
+
+def test_enterprises_loaded():
+    assert len(enterprises.ENTERPRISES) >= 20
+    assert enterprises.IS_DEMO is True  # 未放 data/enterprises.csv 时为示例数据
+
+
+def test_fields_complete():
+    for e in enterprises.ENTERPRISES:
+        assert e["id"] and e["name"]
+        assert e["province_code"] in regions._INDEX
+        assert e["type"] in enterprises.TYPES
+        assert e["categories"]
+        assert float(e["volume"]) > 0
+        assert -90 <= float(e["lat"]) <= 90
+        assert 73 <= float(e["lon"]) <= 136
+
+
+def test_list_sorted_desc():
+    rows = enterprises.list_enterprises()
+    vols = [float(r["volume"]) for r in rows]
+    assert vols == sorted(vols, reverse=True)
+
+
+def test_filter_by_province():
+    rows = enterprises.list_enterprises("370000")
+    assert rows
+    assert all(r["province_code"] == "370000" for r in rows)
+
+
+def test_filter_by_category():
+    rows = enterprises.list_enterprises(category="6")  # 办公废纸
+    assert rows
+    assert all("6" in r["categories"] for r in rows)
+
+
+def test_filter_by_type():
+    rows = enterprises.list_enterprises(etype="造纸企业")
+    assert rows
+    assert all(r["type"] == "造纸企业" for r in rows)
+
+
+def test_by_province_totals_match():
+    rows = enterprises.by_province()
+    total = sum(float(r["volume"]) for r in rows)
+    assert round(total, 1) == enterprises.totals()["volume"]
+    assert sum(int(r["count"]) for r in rows) == len(enterprises.ENTERPRISES)
+
+
+def test_by_province_sorted():
+    vols = [float(r["volume"]) for r in enterprises.by_province()]
+    assert vols == sorted(vols, reverse=True)
+
+
+def test_by_category_covers_all_eight():
+    rows = enterprises.by_category()
+    assert len(rows) == 8
+    assert all(r["name"] for r in rows)
+
+
+def test_by_type_totals():
+    rows = enterprises.by_type()
+    assert sum(int(r["count"]) for r in rows) == len(enterprises.ENTERPRISES)
+
+
+def test_find_by_name():
+    e = enterprises.find("鲁清再生")
+    assert e is not None
+    assert e["city"] == "济南市"
+
+
+def test_find_short_name_returns_none():
+    assert enterprises.find("废") is None
+
+
+def test_summary_national():
+    text = enterprises.summary()
+    assert "回收企业概览" in text
+    assert "示例" in text  # 必须声明是示例数据
+    assert "按类型" in text
+
+
+def test_summary_province_has_coverage():
+    text = enterprises.summary("370000")
+    assert "山东" in text
+    assert "名录覆盖率" in text
+
+
+def test_province_volume_not_exceed_official():
+    """名录是样本，不应超过该省官方回收量（否则数据明显有问题）。"""
+    for row in enterprises.by_province():
+        node = regions.get_node(str(row["province_code"]))
+        if not node:
+            continue
+        official = float(node["stats"]["回收量(万吨)"])  # type: ignore[index]
+        assert float(row["volume"]) <= official, f"{node['name']} 企业量超过官方回收量"
+```
+
+### `tests/test_exporter.py`（96 行）
 
 ```python
 import io
@@ -2282,7 +3109,9 @@ def _load(code="CN", year=2024):
 
 def test_sheets_present():
     wb = _load()
-    assert wb.sheetnames == ["省级统计", "分类回收", "历年回收", "废纸进口", "数据说明"]
+    assert wb.sheetnames == [
+        "省级统计", "分类回收", "历年回收", "废纸进口", "企业名录", "数据说明"
+    ]
 
 
 def test_province_sheet_rows():
@@ -2337,6 +3166,20 @@ def test_notes_sheet_mentions_scope():
     text = "\n".join(str(ws.cell(row=r, column=1).value or "") for r in range(1, ws.max_row + 1))
     assert "市级、县级" in text
     assert "6971" in text
+
+
+def test_enterprise_sheet():
+    ws = _load()["企业名录"]
+    names = [ws.cell(row=r, column=1).value for r in range(4, ws.max_row + 1)]
+    assert "鲁清再生资源有限公司" in names
+    assert ws.cell(row=ws.max_row, column=1).value == "合计"
+
+
+def test_enterprise_sheet_scoped_to_province():
+    ws = _load("370000")["企业名录"]
+    cities = [ws.cell(row=r, column=2).value for r in range(4, ws.max_row + 1)]
+    assert "济南市" in cities
+    assert "广州市" not in cities
 
 
 def test_filename():
@@ -2468,7 +3311,7 @@ def test_tree_structure():
     assert all(c["children"] == [] for c in tree["children"])
 ```
 
-### `tests/test_server.py`（95 行）
+### `tests/test_server.py`（113 行）
 
 ```python
 """Web 层路由测试：锁死「打开就是 Not Found」这类回归。
@@ -2479,6 +3322,8 @@ def test_tree_structure():
 
 因此这里对每个入口路径都断言状态码，并检查首页确实带版本号。
 """
+
+import re
 
 import pytest
 
@@ -2495,7 +3340,8 @@ def test_root_ok():
     r = client.get("/")
     assert r.status_code == 200
     assert "废纸回收 Agent" in r.text
-    assert "v1.3" in r.text
+    # 版本号格式固定，具体数字随发布变化，不做硬编码
+    assert re.search(r"v\d+\.\d+\.\d+", r.text)
 
 
 def test_index_html_ok():
@@ -2549,6 +3395,21 @@ def test_info_api():
     data = client.get("/api/info").json()
     assert len(data["categories"]) == 8
     assert 2024 in data["years"]
+    assert data["enterprise_types"]
+
+
+def test_enterprises_api():
+    data = client.get("/api/enterprises").json()
+    assert data["totals"]["count"] >= 20
+    assert data["list"]
+    assert data["is_demo"] is True
+    assert len(data["by_category"]) == 8
+
+
+def test_enterprises_api_filtered():
+    data = client.get("/api/enterprises", params={"province": "370000"}).json()
+    assert data["list"]
+    assert all(e["province_code"] == "370000" for e in data["list"])
 
 
 def test_export_xlsx():
@@ -2714,8 +3575,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.3.0"
-description = "废纸回收 Agent 对话助手：分类、估价、历年与分类统计（核心逻辑纯标准库）"
+version = "1.4.0"
+description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -2739,6 +3600,14 @@ fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
 openpyxl>=3.1        # 导出 Excel（/export.xlsx）
 httpx>=0.27          # Web 路由测试（fastapi.testclient 依赖）
+```
+
+### `data/enterprises.csv.example`（3 行）
+
+```csv
+id,name,province_code,city,type,categories,volume,lat,lon,note
+E001,某某再生资源有限公司,370000,济南市,分拣打包中心,1;8,26.0,36.65,117.00,示例：请替换为真实企业
+E002,某某纸业原料部,440000,东莞市,造纸企业,1,55.0,23.02,113.75,示例：请替换为真实企业
 ```
 
 ### `.github/workflows/ci.yml`（29 行）
@@ -2777,7 +3646,7 @@ jobs:
 
 ## 五、工具脚本（tools/）
 
-### `tools/gen_code_listing.py`（125 行）
+### `tools/gen_code_listing.py`（127 行）
 
 ```python
 """生成 docs/CODE_LISTING.md：把全部源码嵌入一份独立的代码清单文档。
@@ -2808,6 +3677,7 @@ LANG = {
     ".txt": "text",
     ".md": "markdown",
     ".sh": "bash",
+    ".example": "csv",
 }
 
 # (标题, 目录或文件, 是否递归)
@@ -2824,6 +3694,7 @@ ROOT_FILES = [
     "conftest.py",
     "pyproject.toml",
     "requirements.txt",
+    "data/enterprises.csv.example",
     ".github/workflows/ci.yml",
 ]
 
@@ -2909,4 +3780,4 @@ if __name__ == "__main__":
 
 ---
 
-共收录 26 个文件。
+共收录 29 个文件。
