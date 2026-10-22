@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
-from paper_recycle_agent import exporter, regions, respond
+from paper_recycle_agent import enterprises, exporter, regions, respond
 from paper_recycle_agent import stats as stats_mod
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -75,6 +75,28 @@ def info() -> dict:
         "national_year": regions.NATIONAL_YEAR,
         "latest_year": stats_mod.LATEST_YEAR,
         "tiers": regions.TIER_LABEL,
+        "enterprise_types": enterprises.TYPES,
+        "enterprise_is_demo": enterprises.IS_DEMO,
+    }
+
+
+@app.get("/api/enterprises")
+def enterprise_list(province: Optional[str] = None,
+                    category: Optional[str] = None,
+                    type: Optional[str] = None) -> dict:
+    """企业维度：名录 + 按省 / 按大类 / 按类型汇总。"""
+    code = province if province else None
+    rows = enterprises.list_enterprises(code, category, type)
+    return {
+        "is_demo": enterprises.IS_DEMO,
+        "totals": enterprises.totals(),
+        "list": rows,
+        "by_province": enterprises.by_province(code),
+        "by_category": enterprises.by_category(code),
+        "by_type": enterprises.by_type(code),
+        "types": enterprises.TYPES,
+        "type_desc": enterprises.TYPE_DESC,
+        "filter": {"province": code, "category": category, "type": type},
     }
 
 
