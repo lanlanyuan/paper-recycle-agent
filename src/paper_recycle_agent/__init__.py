@@ -3,6 +3,6 @@
 from . import agent, classifier, knowledge, pricing
 from .agent import respond
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = ["agent", "classifier", "knowledge", "pricing", "respond"]

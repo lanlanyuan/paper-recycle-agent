@@ -4,35 +4,41 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.9-3776ab)
 
-一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并支持命令行对话与可选 HTTP 服务。
+一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
 
 ## 特性
 - 9 类废纸知识库（可回收 / 不可回收及缘由）
 - 关键词分类引擎，多命中智能排序
 - 重量 × 单价回收估价，支持「斤」折算
 - 自然语言对话（问候 / 帮助 / 估价 / 分类）
-- 命令行 `chat` / `classify` / `price` / `categories`
-- 可选 FastAPI 对话服务
+- 命令行 `chat` / `classify` / `price` / `categories` / `info`
+- **接入《中国造纸年鉴》废纸分类（GB/T 20811-2018，8 大类 42 小类）与 2024 行业数据**
+- **Web 图形界面**：FastAPI 聊天页（含分类与行业数据面板）
 - GitHub Actions 多版本 CI
 
 ## 快速开始
 ```bash
-pip install -e .
-paper-recycle-agent chat
+pip install -r requirements.txt   # 含 fastapi / uvicorn
+# 命令行
+PYTHONPATH=src python -m paper_recycle_agent.cli chat
+# 图形界面（浏览器打开 http://localhost:8000）
+uvicorn app.server:app --reload
 ```
 
 ## 项目结构
 ```
 paper-recycle-agent/
-├── src/paper_recycle_agent/   # 核心包
-│   ├── knowledge.py           # 知识库
+├── src/paper_recycle_agent/   # 核心包（纯标准库）
+│   ├── knowledge.py           # 知识库（9 类实用回收指引）
+│   ├── data.py                # 年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
 │   ├── classifier.py          # 分类引擎
 │   ├── pricing.py             # 估价
 │   ├── agent.py               # 对话引擎
 │   └── cli.py                 # 命令行
 ├── tests/                     # pytest 单元测试
-├── app/server.py              # 可选 FastAPI 服务
-├── docs/                      # 使用/贡献/开发日志
+├── app/server.py              # FastAPI 服务（提供图形界面）
+├── app/static/index.html      # 聊天界面（含分类/数据面板）
+├── docs/                      # 使用/贡献/开发日志/代码清单
 └── .github/workflows/ci.yml   # CI
 ```
 
@@ -48,6 +54,7 @@ git log --oneline --graph --all
 - [贡献指南](docs/CONTRIBUTING.md)
 - [开发日志](docs/DEVLOG.md)
 - [更新日志](docs/CHANGELOG.md)
+- [代码清单](docs/CODE_LISTING.md)
 
 ## License
 MIT © 梁湘瑶 / 阿岩

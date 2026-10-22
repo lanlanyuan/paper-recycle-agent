@@ -1,5 +1,11 @@
 # 更新日志（CHANGELOG）
 
+## v1.1.0 (2026-10-22)
+- 新增 `data.py`：GB/T 20811-2018 废纸分类（8 大类 42 小类）+ 2024 行业数据
+- 对话引擎支持「年鉴 / 行业数据 / 回收量 / 分类标准」查询；CLI 新增 `info`
+- 新增 Web 图形界面：FastAPI + `app/static/index.html` 聊天页（含分类与数据面板）
+- 新增 `docs/CODE_LISTING.md` 代码清单文档
+
 ## v1.0.0 (2026-10-22)
 - 补全使用文档与贡献指南
 - 新增 GitHub Actions CI（Python 3.9 / 3.11 矩阵）
