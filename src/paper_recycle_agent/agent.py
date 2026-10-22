@@ -1,15 +1,22 @@
-"""对话引擎：把分类 / 估价能力包装成自然语言回复。"""
+"""对话引擎：把分类 / 估价 / 统计能力包装成自然语言回复。"""
 
 import re
-from typing import Dict, Optional
+from typing import Optional
 
 from . import classifier, data, pricing, regions
+from . import stats as stats_mod
 
 _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
 _HELP = {"帮助", "help", "怎么用", "功能", "能做什么", "用法"}
+# 历年趋势类
+_HISTORY = {"历年", "年份", "以前", "过去", "趋势", "增长", "变化", "这几年", "近五年", "历史数据"}
+# 按类别拆分回收量类
+_CATEGORY_STATS = {"分类数据", "分类回收", "类别占比", "各类回收", "八大类", "按类别", "分类占比", "品种结构"}
+# 年鉴 / 标准 / 分类定义类
 _DATA = {"年鉴", "行业数据", "进口", "标准", "分类标准", "gb/t", "20811",
          "造纸", "废纸分几类", "废纸分类"}
-_REGION = {"回收量", "利用率", "回收率", "统计", "企业数", "从业人员", "数据"}
+# 区域统计类（仅全国与省级）
+_REGION = {"回收量", "利用率", "回收率", "统计", "企业数", "从业人员", "数据", "排名", "占比"}
 
 
 def _extract_weight(text: str) -> Optional[float]:
@@ -23,6 +30,16 @@ def _extract_weight(text: str) -> Optional[float]:
     return val
 
 
+def _extract_year(text: str) -> Optional[int]:
+    """提取文本中的四位年份，如「2020 年分类数据」。"""
+    m = re.search(r"(20\d{2})\s*年?", text)
+    if not m:
+        return None
+    year = int(m.group(1))
+    valid = {int(r["year"]) for r in stats_mod.get_history()}
+    return year if year in valid else None
+
+
 def respond(user_input: str) -> str:
     """根据用户输入返回一句自然语言回复。"""
     text = (user_input or "").strip()
@@ -32,20 +49,34 @@ def respond(user_input: str) -> str:
     low = text.lower()
     if low in _GREETING:
         return (
-            "你好，我是废纸回收助手 🪨。告诉我废纸物品名称"
-            "（如纸箱、报纸、纸巾），或加上重量估算回收价值。输入「帮助」查看用法。"
+            "你好，我是废纸回收助手 🪨。可以问我：废纸是否可回收、估算回收价值、"
+            "全国/各省回收统计、历年趋势、八大类分类回收量。输入「帮助」查看用法。"
         )
     if any(k in text for k in _HELP):
         return _help_text()
 
-    # 年鉴 / 行业数据 / 分类标准类查询
+    # 按类别拆分回收量
+    if any(k in text for k in _CATEGORY_STATS):
+        year = _extract_year(text) or stats_mod.LATEST_YEAR
+        return stats_mod.category_summary(year)
+
+    # 历年趋势
+    if any(k in text for k in _HISTORY):
+        return stats_mod.history_summary()
+
+    # 年鉴 / 行业数据 / 分类标准定义
     if any(k in text for k in _DATA):
         return data.summary_text()
 
-    # 区域分层统计查询（国家 / 省 / 市 / 县区）
+    # 区域统计（全国 / 省级）
     if any(k in text for k in _REGION):
         node = regions.find(text)
-        return regions.summary(node["code"] if node else "CN")
+        return regions.summary(str(node["code"]) if node else "CN")
+
+    # 只给了省份名
+    node = regions.find(text)
+    if node and node["level"] == "province":
+        return regions.summary(str(node["code"]))
 
     weight = _extract_weight(text)
     if weight is not None:
@@ -61,8 +92,10 @@ def _help_text() -> str:
             "废纸回收助手使用说明：",
             "1) 查询是否可回收：直接说物品名，如「纸箱」「报纸」「纸巾」。",
             "2) 估算回收价值：物品名 + 重量，如「办公用纸 3kg」「纸箱 5 斤」。",
-            "3) 查看全部类别：输入「类别」。",
-            "4) 年鉴与行业数据：输入「年鉴」「行业数据」「废纸分类」。",
-            "5) 区域分层统计：输入省/市/县名 + 「回收量」，如「广东省回收量」。",
+            "3) 查看八大类分类标准：输入「废纸分类」。",
+            "4) 按类别看回收量：输入「分类回收数据」「2020 年分类数据」。",
+            "5) 看历年趋势：输入「历年数据」「近五年趋势」。",
+            "6) 看区域统计（仅全国与省级）：输入「山东省回收量」「全国统计」「排名」。",
+            "7) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、说明五张表。",
         ]
     )

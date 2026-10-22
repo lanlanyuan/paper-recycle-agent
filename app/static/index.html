@@ -7,109 +7,243 @@
 <style>
   :root {
     --bg: #f5f7fa; --panel: #ffffff; --ink: #1f2329; --muted: #6b7280;
-    --brand: #2f7d4f; --brand-soft: #e8f3ec; --border: #e5e7eb;
+    --brand: #2f7d4f; --brand-soft: #e8f3ec; --brand-line: #cfe6da;
+    --border: #e5e7eb; --warn-bg: #fff8e6; --warn-line: #f2dfae; --warn-ink: #8a6d1f;
     --user-bubble: #2f7d4f; --bot-bubble: #eef1f5;
+    --bar: #4a9d6b; --bar-2: #8fbfa3;
   }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
          background: var(--bg); color: var(--ink); height: 100vh; display: flex; flex-direction: column; }
-  header { background: var(--brand); color: #fff; padding: 12px 20px; font-size: 17px; font-weight: 600;
-           display: flex; align-items: center; gap: 10px; }
-  header .sub { font-size: 12px; font-weight: 400; opacity: .85; }
+  header { background: var(--brand); color: #fff; padding: 11px 20px; font-size: 17px; font-weight: 600;
+           display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  header .sub { font-size: 12px; font-weight: 400; opacity: .9; }
   .layout { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------- 左：对话 ---------- */
   .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: 80%; padding: 9px 13px; border-radius: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+  .msg { max-width: 82%; padding: 9px 13px; border-radius: 13px; line-height: 1.55;
+         white-space: pre-wrap; word-break: break-word; font-size: 13.5px; }
   .msg.bot { background: var(--bot-bubble); align-self: flex-start; border-bottom-left-radius: 4px; }
   .msg.user { background: var(--user-bubble); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 8px; }
-  .chip { background: var(--brand-soft); color: var(--brand); border: 1px solid #cfe6da; border-radius: 15px;
-          padding: 5px 11px; font-size: 12px; cursor: pointer; }
+  .chip { background: var(--brand-soft); color: var(--brand); border: 1px solid var(--brand-line);
+          border-radius: 15px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
   .chip:hover { background: #dcefe2; }
-  .inputbar { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); align-items: center; }
-  .inputbar input { flex: 1; padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; font-size: 14px; outline: none; }
+  .inputbar { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border);
+              background: var(--panel); align-items: center; }
+  .inputbar input { flex: 1; padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px;
+                    font-size: 14px; outline: none; }
   .inputbar input:focus { border-color: var(--brand); }
-  .inputbar button { background: var(--brand); color: #fff; border: none; border-radius: 9px; padding: 0 18px; height: 38px; font-size: 14px; cursor: pointer; }
+  .inputbar button { background: var(--brand); color: #fff; border: none; border-radius: 9px;
+                     padding: 0 18px; height: 38px; font-size: 14px; cursor: pointer; }
   .inputbar button:disabled { opacity: .5; cursor: default; }
   #micBtn { background: #fff; color: var(--brand); border: 1px solid var(--border); width: 40px; padding: 0; font-size: 17px; }
   #micBtn.listening { background: #fde8e8; border-color: #f5b5b5; animation: pulse 1s infinite; }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(220,80,80,.4);} 70%{box-shadow:0 0 0 10px rgba(220,80,80,0);} 100%{box-shadow:0 0 0 0 rgba(220,80,80,0);} }
-  .side { width: 440px; border-left: 1px solid var(--border); background: var(--panel); overflow-y: auto; padding: 14px 16px; }
-  .side h3 { margin: 0 0 4px; font-size: 15px; color: var(--brand); }
-  .side .hint { font-size: 11px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
-  .crumb { font-size: 13px; margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+
+  /* ---------- 右：统计面板 ---------- */
+  .side { width: 500px; border-left: 1px solid var(--border); background: var(--panel);
+          overflow-y: auto; padding: 12px 14px 24px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 7px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
+         border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  .crumb { font-size: 12.5px; margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
   .crumb-item { color: var(--brand); cursor: pointer; }
   .crumb-item:hover { text-decoration: underline; }
   .crumb .sep { color: var(--muted); }
-  .summary { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; background: #fbfcfd; }
-  .sum-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+
+  .summary { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #fbfcfd; }
+  .sum-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .badge { font-size: 11px; font-weight: 400; color: var(--brand); background: var(--brand-soft); border-radius: 10px; padding: 2px 8px; }
-  .sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+  .badge.grey { color: var(--muted); background: #f1f2f4; }
+  .sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
   .sum-grid div { display: flex; justify-content: space-between; font-size: 12px; }
   .sum-grid span { color: var(--muted); }
   .sum-grid b { color: var(--ink); }
-  .prov { font-size: 10px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+  .prov { font-size: 10.5px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
+
+  .sect-title { font-size: 13px; font-weight: 600; color: var(--ink); margin: 14px 0 6px;
+                display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sect-title .hintline { font-size: 10.5px; font-weight: 400; color: var(--muted); }
+  .scroll { max-height: 268px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { border-bottom: 1px solid var(--border); padding: 6px 6px; text-align: left; }
-  th { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+  th, td { border-bottom: 1px solid var(--border); padding: 5px 6px; text-align: left; white-space: nowrap; }
+  th { background: var(--brand-soft); color: var(--brand); font-weight: 600; position: sticky; top: 0; z-index: 1; }
   tbody tr.row { cursor: pointer; }
   tbody tr.row:hover { background: #f2f8f4; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.hi { background: #f0f8f3; }
   td.empty { color: var(--muted); text-align: center; padding: 14px 0; }
-  .actions { display: flex; gap: 8px; margin: 10px 0 6px; }
-  .actions button { flex: 1; height: 34px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--ink); }
+
+  /* 条形图 */
+  .barwrap { display: flex; align-items: center; gap: 6px; }
+  .bartrack { flex: 1; height: 7px; background: #eef1f4; border-radius: 4px; overflow: hidden; min-width: 40px; }
+  .barfill { height: 100%; background: var(--bar); border-radius: 4px; }
+  .barfill.alt { background: var(--bar-2); }
+  .barval { font-size: 11px; color: var(--muted); width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .chart { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .chart .rowc { display: grid; grid-template-columns: 40px 1fr 56px; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
+  .chart .lbl { color: var(--muted); }
+  .chart .track { height: 12px; background: #eef1f4; border-radius: 3px; overflow: hidden; }
+  .chart .fill { height: 100%; background: var(--bar); border-radius: 3px; transition: width .3s; }
+  .chart .val { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; gap: 8px; margin: 10px 0 4px; }
+  .actions button { flex: 1; height: 34px; border-radius: 8px; font-size: 13px; cursor: pointer;
+                    border: 1px solid var(--border); background: #fff; color: var(--ink); }
   .actions #exportBtn { background: var(--brand); color: #fff; border-color: var(--brand); }
-  details.standards { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 8px; }
+  .actions button:disabled { opacity: .6; cursor: default; }
+
+  .yearbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+  .yearbar select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; color: var(--ink); background: #fff; }
+
+  .notice { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink);
+            border-radius: 8px; padding: 7px 10px; font-size: 11px; line-height: 1.5; margin-bottom: 10px; }
+  details.standards { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 8px; }
   details.standards summary { font-size: 12px; color: var(--muted); cursor: pointer; }
   .std-cat { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px; font-size: 11px; }
   .std-cat .nm { font-weight: 600; font-size: 12px; }
   .std-cat .ex, .std-cat .nt { color: var(--muted); margin-top: 2px; }
-  @media (max-width: 900px) { .side { display: none; } }
+  @media (max-width: 980px) { .side { display: none; } }
 </style>
 </head>
 <body>
-<header>🪨 废纸回收 Agent 对话助手 <span class="sub">v1.2.1 · 四级区域统计 · 分类估价 · 语音输入 · Excel 导出</span></header>
+<header>🪨 废纸回收 Agent 对话助手
+  <span class="sub">v1.3.0 · 全国+省级统计 · 历年数据 · 八大类分类 · 语音输入 · 多表 Excel</span>
+</header>
 <div class="layout">
   <div class="chat">
     <div class="messages" id="messages"></div>
     <div class="chips" id="chips"></div>
     <div class="inputbar">
-      <button id="micBtn" title="语音输入（需 Chrome/Edge）">🎤</button>
-      <input id="input" placeholder="说或输入：纸箱 2kg / 广东省回收量 / 废纸分类" onkeydown="if(event.key==='Enter')send()" />
+      <button id="micBtn" title="语音输入（需 Chrome / Edge）">🎤</button>
+      <input id="input" placeholder="说或输入：纸箱 2kg / 山东省回收量 / 2020年分类数据 / 历年趋势"
+             onkeydown="if(event.key==='Enter')send()" />
       <button id="sendBtn" onclick="send()">发送</button>
     </div>
   </div>
+
   <aside class="side">
-    <h3>区域废纸回收统计</h3>
-    <div class="hint">点击表格中的区域可逐级下钻：全国 → 省 → 市 → 县区。国家级为官方口径，省市县为分层测算（可替换真实数据）。</div>
-    <div class="crumb" id="crumb"></div>
-    <div class="summary" id="summary"></div>
-    <table id="statsTable">
-      <thead><tr><th>区域</th><th>回收量(万吨)</th><th>回收率(%)</th><th>利用率(%)</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="actions">
-      <button id="backBtn" onclick="goBack()">返回上一级</button>
-      <button id="exportBtn" onclick="exportExcel()">导出 Excel</button>
+    <div class="tabs">
+      <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
+      <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
+      <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
     </div>
-    <details class="standards">
-      <summary>内部参考：行业标准（GB/T 20811-2018）</summary>
-      <div id="standardsBody"></div>
-    </details>
+
+    <!-- 区域统计 -->
+    <section class="pane active" id="pane-region">
+      <div class="crumb" id="crumb"></div>
+      <div class="summary" id="summary"></div>
+      <div class="notice">
+        本工具只提供<b>全国</b>与<b>省级</b>两级统计。市级、县级废纸回收量无公开权威数据，为避免误导已下线。
+        全国值为中国造纸协会官方口径；山东、广东为公开报道值，其余省份为梯队测算（表中标注）。
+      </div>
+      <div class="sect-title">
+        <span>省级回收量排名（2024 年）</span>
+        <span class="hintline">点击行查看该省明细</span>
+      </div>
+      <div class="scroll">
+        <table id="provTable">
+          <thead>
+            <tr>
+              <th class="num">#</th><th>区域</th>
+              <th class="num">回收量(万吨)</th><th class="num">占比(%)</th><th>数据</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button id="backBtn" onclick="goBack()">返回全国</button>
+        <button id="exportBtn" onclick="exportExcel()">导出 Excel</button>
+      </div>
+    </section>
+
+    <!-- 历年数据 -->
+    <section class="pane" id="pane-history">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="yearSel" onchange="changeYear(this.value)"></select>
+        <span id="yearHint"></span>
+      </div>
+      <div class="sect-title"><span>回收量走势（万吨）</span><span class="hintline" id="histScope"></span></div>
+      <div class="chart" id="histChart"></div>
+      <div class="sect-title"><span>历年明细</span><span class="hintline">来源：中国造纸协会年度报告</span></div>
+      <div class="scroll">
+        <table id="histTable">
+          <thead>
+            <tr>
+              <th class="num">年份</th><th class="num">回收量</th><th class="num">同比</th>
+              <th class="num">回收率</th><th class="num">利用率</th><th class="num">进口量</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="sect-title"><span>废纸进口量（万吨）</span><span class="hintline">2021 年禁废令后清零</span></div>
+      <div class="chart" id="impChart"></div>
+      <div class="actions">
+        <button onclick="exportExcel()">导出 Excel（含历年表）</button>
+      </div>
+    </section>
+
+    <!-- 分类结构 -->
+    <section class="pane" id="pane-category">
+      <div class="yearbar">
+        <span>数据年份</span>
+        <select id="yearSel2" onchange="changeYear(this.value)"></select>
+        <span id="catScope"></span>
+      </div>
+      <div class="notice">
+        官方<b>未逐类公布</b>回收量。下表为「行业结构占比 × 当年回收量」估算：
+        占比按 2015 / 2020 / 2025 三个锚点线性插值，货值按参考价估算。可作结构参考，不宜作为统计公报数据。
+      </div>
+      <div class="sect-title"><span>八大类回收量（GB/T 20811-2018）</span><span class="hintline" id="catTotal"></span></div>
+      <div class="chart" id="catChart"></div>
+      <div class="scroll" style="max-height:320px">
+        <table id="catTable">
+          <thead>
+            <tr>
+              <th class="num">代码</th><th>类别</th>
+              <th class="num">占比</th><th class="num">回收量(万吨)</th><th class="num">货值(亿元)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button onclick="exportExcel()">导出 Excel（含分类表）</button>
+      </div>
+      <details class="standards">
+        <summary>内部参考：行业标准（GB/T 20811-2018 分类技术要求）</summary>
+        <div id="standardsBody"></div>
+      </details>
+    </section>
   </aside>
 </div>
 
 <script>
-  const SUGGESTIONS = ["纸箱能回收吗", "办公用纸 3kg", "广东省回收量", "废纸分类", "全国统计"];
+  const SUGGESTIONS = [
+    "纸箱能回收吗", "办公用纸 3kg", "山东省回收量",
+    "全国统计", "历年数据", "分类回收数据"
+  ];
   const messagesEl = document.getElementById("messages");
   const chipsEl = document.getElementById("chips");
   const inputEl = document.getElementById("input");
   const sendBtn = document.getElementById("sendBtn");
   const micBtn = document.getElementById("micBtn");
-  const LEVEL = { national: "国家", province: "省", city: "市", county: "县区" };
 
-  let currentCode = "CN";
-  let breadcrumb = [];
+  const state = { code: "CN", year: 2024, data: null };
 
+  /* ---------------- 对话 ---------------- */
   function addMsg(text, who) {
     const div = document.createElement("div");
     div.className = "msg " + who;
@@ -145,16 +279,28 @@
     }
   }
 
+  /* ---------------- 标签页 ---------------- */
+  function switchTab(name) {
+    document.querySelectorAll(".tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.pane === name);
+    });
+    document.querySelectorAll(".pane").forEach(p => {
+      p.classList.toggle("active", p.id === "pane-" + name);
+    });
+  }
+
+  /* ---------------- 区域 ---------------- */
   function renderCrumb(items) {
     const el = document.getElementById("crumb");
     el.innerHTML = "";
     items.forEach((it, i) => {
       const a = document.createElement("span");
       a.className = "crumb-item"; a.textContent = it.name;
-      a.onclick = () => loadStats(it.code);
+      a.onclick = () => loadStats(it.code, state.year);
       el.appendChild(a);
       if (i < items.length - 1) {
-        const s = document.createElement("span"); s.className = "sep"; s.textContent = " / ";
+        const s = document.createElement("span");
+        s.className = "sep"; s.textContent = " / ";
         el.appendChild(s);
       }
     });
@@ -162,80 +308,198 @@
 
   function renderSummary(node) {
     const s = node.stats;
+    const isNational = node.level === "national";
+    const badge = isNational
+      ? `<span class="badge">国家</span>`
+      : `<span class="badge">省</span><span class="badge grey">${node.tier_label || ""}</span>`;
+    const extra = isNational
+      ? `<div><span>纸及纸板产量</span><b>${s["纸及纸板产量(万吨)"]} 万吨</b></div>
+         <div><span>从业人员</span><b>${s["从业人员(人)"]} 人</b></div>`
+      : `<div><span>占全国比重</span><b>${s["占全国比重(%)"]}%</b></div>
+         <div><span>全国排名</span><b>第 ${node.rank || "—"} 位</b></div>`;
     document.getElementById("summary").innerHTML =
-      `<div class="sum-name">${node.name} <span class="badge">${LEVEL[node.level] || node.level}</span></div>
+      `<div class="sum-name">${node.name} ${badge}</div>
        <div class="sum-grid">
          <div><span>回收量</span><b>${s["回收量(万吨)"]} 万吨</b></div>
          <div><span>回收率</span><b>${s["回收率(%)"]}%</b></div>
          <div><span>利用率</span><b>${s["利用率(%)"]}%</b></div>
-         <div><span>企业数</span><b>${s["回收企业数(家)"]}</b></div>
+         <div><span>企业数</span><b>${s["回收企业数(家)"]} 家</b></div>
+         ${extra}
        </div>
-       <div class="prov">${node.provenance}</div>`;
+       <div class="prov">数据年度 ${node.year} 年 · ${node.provenance}</div>`;
   }
 
-  function renderTable(children) {
-    const tb = document.querySelector("#statsTable tbody");
+  function renderProvTable(children) {
+    const tb = document.querySelector("#provTable tbody");
     tb.innerHTML = "";
     if (!children.length) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td colspan="4" class="empty">该区域为最末级（县区），无下级明细</td>`;
+      tr.innerHTML = `<td colspan="5" class="empty">省级为最末级，无下级明细</td>`;
       tb.appendChild(tr);
       return;
     }
+    const max = Math.max(...children.map(c => c.stats["回收量(万吨)"]));
     children.forEach(c => {
       const tr = document.createElement("tr");
-      tr.className = "row";
-      tr.onclick = () => loadStats(c.code);
-      tr.innerHTML = `<td>${c.name}</td><td>${c.stats["回收量(万吨)"]}</td>` +
-                     `<td>${c.stats["回收率(%)"]}</td><td>${c.stats["利用率(%)"]}</td>`;
+      tr.className = "row" + (c.code === state.code ? " hi" : "");
+      tr.onclick = () => loadStats(c.code, state.year);
+      const pct = (c.stats["回收量(万吨)"] / max * 100).toFixed(1);
+      tr.innerHTML =
+        `<td class="num">${c.rank || ""}</td>
+         <td>${c.name}</td>
+         <td class="num">
+           <div class="barwrap">
+             <div class="bartrack"><div class="barfill" style="width:${pct}%"></div></div>
+             <div class="barval">${c.stats["回收量(万吨)"]}</div>
+           </div>
+         </td>
+         <td class="num">${c.stats["占全国比重(%)"]}</td>
+         <td>${c.quality === "reported" ? "报道" : "测算"}</td>`;
       tb.appendChild(tr);
     });
   }
 
-  async function loadStats(code) {
+  /* ---------------- 历年 ---------------- */
+  function renderHistory(history, scope) {
+    const rows = history.filter(h => h.recovery !== null);
+    const max = Math.max(...rows.map(h => h.recovery));
+    document.getElementById("histScope").textContent = scope === "national" ? "全国" : "按该省占比折算";
+    const chart = document.getElementById("histChart");
+    chart.innerHTML = rows.map(h =>
+      `<div class="rowc">
+         <div class="lbl">${h.year}</div>
+         <div class="track"><div class="fill" style="width:${(h.recovery / max * 100).toFixed(1)}%"></div></div>
+         <div class="val">${h.recovery}</div>
+       </div>`).join("");
+
+    const tb = document.querySelector("#histTable tbody");
+    tb.innerHTML = history.map(h => {
+      const yoy = h.yoy === null ? "—" : (h.yoy > 0 ? "+" : "") + h.yoy + "%";
+      const imp = h.import === null || h.import === undefined ? "—" : h.import;
+      const util = h.utilization === null || h.utilization === undefined ? "—" : h.utilization + "%";
+      return `<tr>
+        <td class="num">${h.year}</td>
+        <td class="num">${h.recovery === null ? "—" : h.recovery}</td>
+        <td class="num">${yoy}</td>
+        <td class="num">${h.recovery_rate}%</td>
+        <td class="num">${util}</td>
+        <td class="num">${imp}</td>
+      </tr>`;
+    }).join("");
+
+    const imp = document.getElementById("impChart");
+    const impRows = state.data.import_series;
+    const impMax = Math.max(...impRows.map(r => r.value)) || 1;
+    imp.innerHTML = impRows.map(r =>
+      `<div class="rowc">
+         <div class="lbl">${r.year}</div>
+         <div class="track"><div class="fill alt" style="width:${(r.value / impMax * 100).toFixed(1)}%"></div></div>
+         <div class="val">${r.value}</div>
+       </div>`).join("");
+  }
+
+  /* ---------------- 分类 ---------------- */
+  function renderCategory(categories, total, scopeName) {
+    const maxShare = Math.max(...categories.map(c => c.share));
+    document.getElementById("catScope").textContent = scopeName;
+    document.getElementById("catTotal").textContent =
+      `合计 ${total} 万吨`;
+    document.getElementById("catChart").innerHTML = categories.map(c =>
+      `<div class="rowc" style="grid-template-columns:118px 1fr 62px">
+         <div class="lbl">${c.name}</div>
+         <div class="track"><div class="fill" style="width:${(c.share / maxShare * 100).toFixed(1)}%"></div></div>
+         <div class="val">${c.share}%</div>
+       </div>`).join("");
+
+    const tb = document.querySelector("#catTable tbody");
+    tb.innerHTML = categories.map(c =>
+      `<tr>
+         <td class="num">${c.code}</td>
+         <td title="${c.use}">${c.name}</td>
+         <td class="num">${c.share}%</td>
+         <td class="num">${c.tonnage}</td>
+         <td class="num">${c.value}</td>
+       </tr>`).join("");
+  }
+
+  /* ---------------- 数据加载 ---------------- */
+  async function loadStats(code, year) {
     try {
-      const res = await fetch(`/api/stats?code=${encodeURIComponent(code)}`);
+      const q = new URLSearchParams({ code: code || "CN" });
+      if (year) q.set("year", year);
+      const res = await fetch("/api/stats?" + q.toString());
+      if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
-      currentCode = data.node.code;
-      breadcrumb = data.breadcrumb;
+      state.code = data.node.code;
+      state.year = data.year;
+      state.data = data;
+
+      fillYearSelectors(data.years, data.year, data.national_year);
       renderCrumb(data.breadcrumb);
       renderSummary(data.node);
-      renderTable(data.children);
-    } catch (e) { /* ignore */ }
+      renderProvTable(data.children);
+      renderHistory(data.history, data.scope);
+      renderCategory(data.categories, data.base_tonnage, data.node.name);
+      const back = document.getElementById("backBtn");
+      back.textContent = data.scope === "national" ? "已在最上级" : "返回全国";
+      back.disabled = data.scope === "national";
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function fillYearSelectors(years, current, nationalYear) {
+    const opts = years.map(y =>
+      `<option value="${y}"${y === current ? " selected" : ""}>${y} 年${y === nationalYear ? "（省级同口径）" : ""}</option>`
+    ).join("");
+    ["yearSel", "yearSel2"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = opts;
+    });
+    document.getElementById("yearHint").textContent = current === nationalYear ? "" : "（非省级口径年份）";
+  }
+
+  function changeYear(y) {
+    loadStats(state.code, parseInt(y, 10));
   }
 
   function goBack() {
-    if (breadcrumb.length > 1) loadStats(breadcrumb[breadcrumb.length - 2].code);
+    loadStats("CN", state.year);
   }
 
+  /* ---------------- Excel 导出 ---------------- */
   async function exportExcel() {
-    const btn = document.getElementById("exportBtn");
-    const label = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "导出中…";
-    const url = `/export.xlsx?code=${encodeURIComponent(currentCode)}`;
+    const btns = [document.getElementById("exportBtn")].filter(Boolean);
+    const label = btns.length ? btns[0].textContent : "";
+    btns.forEach(b => { b.disabled = true; b.textContent = "导出中…"; });
+    const url = `/export.xlsx?code=${encodeURIComponent(state.code)}&year=${state.year}`;
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const blob = await res.blob();
+      const name = `废纸回收统计_${(state.data && state.data.node.name) || "全国"}_${state.year}.xlsx`;
       const obj = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = obj;
-      a.download = `废纸回收统计_${currentCode}.xlsx`;
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(obj), 3000);
-      btn.textContent = "已导出 ✓";
-      setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1500);
+      setTimeout(() => URL.revokeObjectURL(obj), 4000);
+      btns.forEach(b => { b.textContent = "已导出 ✓"; });
+      setTimeout(() => {
+        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
+      }, 1600);
     } catch (e) {
-      // 回退：新窗口打开下载地址
       window.open(url, "_blank");
-      btn.textContent = "已打开下载";
-      setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1500);
+      btns.forEach(b => { b.textContent = "已打开下载"; });
+      setTimeout(() => {
+        btns.forEach(b => { b.textContent = label || "导出 Excel"; b.disabled = false; });
+      }, 1600);
     }
   }
 
+  /* ---------------- 行业标准 ---------------- */
   async function loadInfo() {
     try {
       const res = await fetch("/api/info");
@@ -244,15 +508,15 @@
       info.categories.forEach(c => {
         const d = document.createElement("div");
         d.className = "std-cat";
-        d.innerHTML = `<div class="nm">${c.code}. ${c.name}</div>` +
-                      `<div class="ex">${c.examples.join("、")}</div>` +
-                      `<div class="nt">${c.note}</div>`;
+        d.innerHTML = `<div class="nm">${c.code}. ${c.name}</div>
+                       <div class="ex">${c.examples.join("、")}</div>
+                       <div class="nt">${c.note}</div>`;
         box.appendChild(d);
       });
     } catch (e) { /* ignore */ }
   }
 
-  // 语音输入（浏览器 Web Speech API，无需第三方）
+  /* ---------------- 语音输入 ---------------- */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recog = null;
   if (SR) {
@@ -274,8 +538,10 @@
     try { recog.start(); } catch (e) { recog.stop(); }
   };
 
-  addMsg("你好，我是废纸回收助手 🪨。可以问我废纸是否可回收、估算价值，或查询某个省/市/县区的回收统计。右侧可直接下钻并导出 Excel。", "bot");
-  loadStats("CN");
+  addMsg("你好，我是废纸回收助手 🪨\n" +
+         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量。\n" +
+         "右侧三个标签页分别是「区域统计」「历年数据」「分类结构」，都可导出 Excel。", "bot");
+  loadStats("CN", 2024);
   loadInfo();
 </script>
 </body>

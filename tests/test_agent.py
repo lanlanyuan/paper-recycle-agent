@@ -35,3 +35,38 @@ def test_respond_yearbook_query():
 def test_respond_industry_data():
     out = agent.respond("回收量多少")
     assert "回收量" in out or "6971" in out
+
+
+def test_respond_history_intent():
+    out = agent.respond("历年数据")
+    assert "历年" in out
+    assert "2014" in out
+
+
+def test_respond_history_trend_intent():
+    out = agent.respond("近五年趋势")
+    assert "历年" in out
+
+
+def test_respond_category_stats_intent():
+    out = agent.respond("分类回收数据")
+    assert "废瓦楞纸箱类" in out
+    assert "八大类" in out
+
+
+def test_respond_category_stats_with_year():
+    out = agent.respond("2020 年分类数据")
+    assert "2020" in out
+    assert "废瓦楞纸箱类" in out
+
+
+def test_respond_province_only():
+    out = agent.respond("山东省")
+    assert "山东省" in out
+    assert "763" in out
+
+
+def test_no_city_data_claim():
+    """市级数据已下线，助手不应再声称能查市县。"""
+    out = agent.respond("帮助")
+    assert "仅全国与省级" in out

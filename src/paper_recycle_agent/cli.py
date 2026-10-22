@@ -3,7 +3,8 @@
 import argparse
 import sys
 
-from . import agent, classifier, data, pricing
+from . import agent, classifier, data, pricing, regions
+from . import stats as stats_mod
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -19,6 +20,15 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("weight", type=float, help="重量(kg)")
     sub.add_parser("categories", help="列出所有类别")
     sub.add_parser("info", help="废纸分类标准与行业数据")
+    sub.add_parser("history", help="历年回收量 / 回收率 / 利用率")
+    cs = sub.add_parser("catstats", help="按八大类拆分回收量")
+    cs.add_argument("year", type=int, nargs="?", default=stats_mod.LATEST_YEAR)
+    rg = sub.add_parser("region", help="区域统计（全国 / 省级）")
+    rg.add_argument("name", nargs="?", default="全国")
+    ex = sub.add_parser("export", help="导出 Excel")
+    ex.add_argument("name", nargs="?", default="全国")
+    ex.add_argument("--year", type=int, default=regions.NATIONAL_YEAR)
+    ex.add_argument("--out", default="废纸回收统计.xlsx")
     return p
 
 
@@ -36,6 +46,21 @@ def main(argv=None) -> int:
             print(f"- {c['name']} [{tag}]")
     elif args.cmd == "info":
         print(data.summary_text())
+    elif args.cmd == "history":
+        print(stats_mod.history_summary())
+    elif args.cmd == "catstats":
+        print(stats_mod.category_summary(args.year))
+    elif args.cmd == "region":
+        node = regions.find(args.name)
+        print(regions.summary(str(node["code"]) if node else "CN"))
+    elif args.cmd == "export":
+        from . import exporter
+
+        node = regions.find(args.name) or regions.ROOT
+        content = exporter.build_workbook(str(node["code"]), args.year)
+        with open(args.out, "wb") as fh:
+            fh.write(content)
+        print(f"已导出：{args.out}（{len(content)} 字节，5 张工作表）")
     else:
         _chat_loop()
     return 0
