@@ -114,3 +114,55 @@ PYTHONPATH=src python -m paper_recycle_agent.cli export 山东 --year 2020 --out
 
 - 本工具只提供**全国**与**省级**两级统计，市级、县级数据已下线（无公开权威来源）。
 - 分类回收量是「结构占比 × 官方回收量」的**估算值**，不是官方分项统计。
+
+## 企业维度（v1.4.0 新增）
+
+### 命令行
+
+```bash
+# 全国企业概览（按类型、按大类汇总）
+PYTHONPATH=src python -m paper_recycle_agent.cli enterprises
+
+# 某省企业概览（含名录覆盖率）
+PYTHONPATH=src python -m paper_recycle_agent.cli enterprises --province 山东
+
+# 按类型筛选
+PYTHONPATH=src python -m paper_recycle_agent.cli enterprises --province 广东 --type 造纸企业
+```
+
+### 对话里可以这么问
+
+| 想查什么 | 输入示例 |
+| --- | --- |
+| 全国企业概览 | 「企业名录」「有哪些回收企业」 |
+| 某省企业 | 「山东有哪些回收企业」「广东的打包厂」 |
+| 单个企业 | 「鲁清再生」「青岛海岳」 |
+| 按类型 | 「分拣中心」「造纸厂」「贸易商」 |
+
+### 图形界面「企业分布」标签页
+
+- 三个筛选器：省份 / 大类 / 类型，任意组合
+- 地理分布示意图：点大小 = 年回收量，颜色 = 企业类型，悬停看详情
+- 类型分布条形图 + 企业明细表（按年回收量降序）
+
+### 换成你自己的企业名录
+
+```bash
+cp data/enterprises.csv.example data/enterprises.csv
+# 按表头填写真实企业，重启服务即可
+```
+
+字段说明见 [DATA_SOURCES.md](DATA_SOURCES.md) 第八节。填好后页面顶部的「示例」提示会自动消失，
+导出 Excel 的「企业名录」表也会标注为真实数据。
+
+## 语音输入用不了怎么办
+
+页面输入框下方会直接显示原因，对照处理即可：
+
+| 提示 | 原因 | 处理 |
+| --- | --- | --- |
+| 麦克风权限被拒绝 | 浏览器拒绝了麦克风 | 点地址栏左侧图标 → 允许麦克风 → 刷新 |
+| 页面嵌在预览框里 | iframe 被 Permissions Policy 限制 | 在新标签页打开页面 |
+| 要求 HTTPS 或 localhost | 非安全上下文 | 用 https 或本机地址访问 |
+| 语音识别服务连接失败 | Chrome 识别服务在部分网络不可用 | 改用文字输入 |
+| 当前浏览器不支持 | Firefox / 部分 Safari 无此 API | 用 Chrome / Edge |
