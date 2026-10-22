@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/your-name/paper-recycle-agent/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Python](https://img.shields.io/badge/python-%3E%3D3.9-3776ab)
+![Python](https://img.shields.io/badge/python-%3E%3D3.7-3776ab)
 
 一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
 
@@ -11,10 +11,30 @@
 | 方式 | 怎么用 | 需要什么 | 能力 |
 | --- | --- | --- | --- |
 | **① 离线单文件**（最稳） | 双击 `dist/paper-recycle-offline.html` | 只要浏览器 | 对话、四个标签页、CSV 导出 |
-| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.9+ | 全部功能，含六表 xlsx 导出、语音输入 |
+| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能，含六表 xlsx 导出、语音输入 |
 | **③ 在线版** | 打开分享链接 | 能访问外网 | 同 ② |
 
 > 打不开线上链接时，先用 ① —— 它是单个 HTML 文件，数据全部内联，不联网、不起服务、双击即开。
+
+## 运行环境：分三档，别被 3.9 吓到
+
+核心包**零依赖**，只用 Python 标准库（唯一的版本门槛是 `dataclasses`，Python 3.7 引入）：
+
+| 能力 | 最低 Python | 需要装什么 |
+| --- | --- | --- |
+| 命令行对话 / 统计 / 分类估价 | **3.7** | 什么都不用装 |
+| 离线单文件版（已随仓库提供） | **3.7** | 什么都不用装 |
+| 导出 `.xlsx` 工作簿 | 3.7 | `pip install openpyxl` |
+| Web 图形界面（FastAPI） | 3.8 | `pip install -r requirements.txt` |
+
+`启动本地版.bat` 会自动探测版本并分流：3.8+ 起服务；只有 3.7 时直接打开离线版；没装 Python 会明确告知（Windows 自带的 `python.exe` 常常只是微软商店的跳转桩，双击只会打开商店，并不代表装好了）。
+
+仓库带一个可执行的兼容性校验器，把「支持 3.7」变成可验证的约束而不是口头承诺：
+
+```bash
+python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 3.8/3.9 专有 API
+```
+
 
 ## 这个 Agent 解决什么问题
 
@@ -54,7 +74,8 @@
 - **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 企业 / 数据说明 六张表）
 - **对话支持语音输入**（浏览器 Web Speech API，失败时在输入框下方显示具体原因）
 - **Web 图形界面**：FastAPI 聊天页 + 区域/历年/分类/企业 四个标签页
-- GitHub Actions 多版本 CI
+- **核心零依赖、Python 3.7 起可用**；openpyxl 为可选依赖，缺失时导出接口返回 503 并给出安装提示
+- GitHub Actions 多版本 CI（3.8 / 3.11 / 3.13 跑全量，3.7 跑零依赖核心）
 
 ## 数据口径（重要）
 
@@ -70,13 +91,15 @@
 
 ## 快速开始
 ```bash
-pip install -r requirements.txt   # 含 fastapi / uvicorn / openpyxl
-# 命令行
+# 只想用命令行：什么都不用装（Python 3.7+）
 PYTHONPATH=src python -m paper_recycle_agent.cli history
 PYTHONPATH=src python -m paper_recycle_agent.cli catstats 2024
+PYTHONPATH=src python -m paper_recycle_agent.cli region 山东
+
+# 需要 xlsx 导出 / 图形界面
+pip install -r requirements.txt   # fastapi + uvicorn + openpyxl + pytest
 PYTHONPATH=src python -m paper_recycle_agent.cli export 山东 --year 2024 --out 山东.xlsx
-# 图形界面（浏览器打开 http://localhost:8000）
-uvicorn app.server:app --reload
+uvicorn app.server:app --reload    # 浏览器打开 http://localhost:8000
 ```
 
 ## 项目结构
@@ -88,16 +111,18 @@ paper-recycle-agent/
 │   ├── stats.py               # 历年序列 + 八大类占比与分类回收量
 │   ├── regions.py             # 全国 + 省级两级统计
 │   ├── enterprises.py         # 企业名录（地理坐标 / 类型 / 主营品类 / 年回收量）
-│   ├── exporter.py            # 多表 Excel 导出（openpyxl）
+│   ├── exporter.py            # 多表 Excel 导出（openpyxl，按需导入）
 │   ├── classifier.py          # 分类引擎
 │   ├── pricing.py             # 估价
 │   ├── agent.py               # 对话引擎
 │   └── cli.py                 # 命令行
 ├── data/enterprises.csv.example  # 企业名录模板（复制为 enterprises.csv 即启用真实数据）
-├── tests/                     # pytest 单元测试（101 项）
+├── tests/                     # pytest 单元测试（111 项）
+├── tools/                     # 代码清单生成 / 离线版构建 / Python 3.7 兼容性校验
 ├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出）
 ├── app/static/index.html      # 聊天界面（区域 / 历年 / 分类 / 企业 四标签页）
 ├── run.py                     # 读取 PORT 的统一启动入口
+├── 启动本地版.bat              # 一键启动（纯 ASCII，避免 cmd 按 GBK 解析中文出错）
 ├── docs/                      # 使用/贡献/开发日志/代码清单/数据来源
 └── .github/workflows/ci.yml   # CI
 ```

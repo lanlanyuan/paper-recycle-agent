@@ -3,15 +3,39 @@
 ## 安装
 
 ```bash
-# 克隆后进入目录
+# 方式一：什么都不装，直接跑（Python 3.7+）
+PYTHONPATH=src python -m paper_recycle_agent.cli history
+
+# 方式二：装成命令（核心仍零依赖）
 pip install -e .
+
+# 需要 Excel 导出
+pip install -e ".[excel]"
+
+# 需要图形界面
+pip install -e ".[web]"
 
 # 仅跑测试
 pip install pytest
 PYTHONPATH=src pytest -q
 ```
 
-> 运行时**无第三方依赖**，纯 Python 标准库即可。Python ≥ 3.9。
+> 运行时**无第三方依赖**，纯 Python 标准库即可，**最低 Python 3.7**。
+>
+> 版本分档：
+>
+> | 能力 | 最低 Python | 额外依赖 |
+> | --- | --- | --- |
+> | 命令行 / 统计 / 分类估价 | 3.7 | 无 |
+> | 离线单文件版 | 3.7 | 无 |
+> | 导出 `.xlsx` | 3.7 | `openpyxl` |
+> | 图形界面 | 3.8 | `fastapi` / `uvicorn` |
+>
+> 仓库自带校验器，可随时验证代码没有越界用到 3.8+ 的语法或 API：
+>
+> ```bash
+> python tools/check_compat.py
+> ```
 
 ## 命令行
 
@@ -187,12 +211,38 @@ PYTHONPATH=src python tools/build_offline.py
 
 双击 `启动本地版.bat`（Windows），等窗口出现提示后用浏览器打开 `http://localhost:8000`。
 
+脚本会自动探测 Python 并分流：
+
+| 探测结果 | 脚本行为 |
+| --- | --- |
+| Python 3.8+ | 装依赖 → 起服务 |
+| Python 3.7 | 提示图形界面需要 3.8+ → 自动打开离线版 |
+| 找不到可用的 Python | 提示下载地址 + 离线版路径，并说明"商店跳转桩"陷阱 |
+
+只看检测结果、不启动服务：
+
+```bat
+启动本地版.bat --check
+```
+
+输出示例：
+
+```
+[ok] interpreter: python   version: 3.13.14
+--------------------------------------------
+[result] full support: web UI can start.
+```
+
+> **为什么脚本里全是英文**：`.bat` 由 cmd.exe 按控制台代码页逐行解析，UTF-8 中文会把逻辑切断（首行加 BOM 还会让 `@echo off` 直接失效）。纯 ASCII 才能在任何 Windows 语言环境下都正常执行。中文说明放在本文档里。
+
 命令行方式：
 
 ```bash
 pip install -r requirements.txt
 PYTHONPATH=src PORT=8000 python run.py
 ```
+
+没装 openpyxl 时服务仍能启动，只是点「导出 Excel」会返回 503 并在按钮下方提示 `pip install openpyxl`，不会抛 500。
 
 ### ③ 在线版
 

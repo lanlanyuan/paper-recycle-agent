@@ -207,3 +207,78 @@ Permissions Policy 直接拦截。原代码把它们全部无视，用户只会�
 77 → 101 项。新增 `test_enterprises.py`（16 项），其中一条是防呆的：
 `test_province_volume_not_exceed_official` —— 任何省份的企业合计都不得超过该省官方回收量，
 否则说明示例数据编得不合理。
+
+---
+
+### 2026-10-23 · 把运行环境门槛降下来（PR #18, closes #23 #24 #25）
+
+起因是一句话：「我有 python，你不要用 3.9 版本那么高」。
+
+先做体检而不是先改代码：全仓库 grep 了 walrus、`match`、`removeprefix`、`zoneinfo`、
+PEP 604 联合类型、f-string 自文档等特性，结果是**一个都没有**。唯一的版本门槛是
+`dataclasses`（3.7 引入）。也就是说「需要 3.9」这个声明本身就没有依据——它大概是写
+`pyproject.toml` 时随手填的默认值。
+
+#### 真正的拦路石不是语法，是 openpyxl
+
+`exporter.py` 顶层 `from openpyxl import Workbook`，而 `__init__.py` import 了 exporter。
+于是「没装 openpyxl」的机器连 `import paper_recycle_agent` 都会失败——命令行、离线版全废。
+这跟 Python 版本无关，但它是「换个环境就跑不起来」的主要原因，顺手一起解决：
+
+- 样式对象（`PatternFill` / `Font` / `Border`）改成 `_styles()` 惰性构造并缓存；
+- `_require_openpyxl()` 负责导入并抛带安装指引的 `RuntimeError`；
+- 新增 `available()`，`/export.xlsx` 缺依赖时返回 503 + JSON 说明；
+- 前端加一行状态提示，缺依赖时提前说，失败时显示原因而不是静默下载一个 JSON。
+
+#### 让「支持 3.7」变成可验证的约束
+
+新增 `tools/check_compat.py`：用 `ast.parse(..., feature_version=(3, 7))` 解析每个 `.py`，
+再扫 3.8/3.9 专有 API，以及未开 `from __future__ import annotations` 时的内置泛型注解。
+写完先拿一个故意违规的文件试了一遍——必须确认它会红，否则这个校验器只是装饰品：
+
+```
+· tools/_probe_bad.py:5: `.removeprefix` 需要 Python 3.9，本仓库下限为 3.7
+· tools/_probe_bad.py:4: 注解 `list[...]` 需要 Python 3.9，请改用 typing.List ...
+结果：不通过
+```
+
+#### 启动脚本：两种编码都试过，都不行
+
+第一版按惯例写 UTF-8 + `chcp 65001`，跑起来直接崩：
+
+```
+'e' 不是内部或外部命令
+'exe' 不是内部或外部命令
+```
+
+cmd.exe 按控制台代码页逐行解析 `.bat`，UTF-8 中文把 `!PYEXE!` 切断成了碎片。
+接着试 UTF-8 加 BOM，首行变成带 BOM 的 `@echo off`，`@echo off` 失效、每行都回显。
+GBK 在中文系统上能用，但系统一旦开了「Beta: 使用 Unicode UTF-8」又会崩。
+
+结论：**启动脚本必须纯 ASCII**。中文说明挪进 README / USAGE。同时补了两件事：
+- `:probe` 实测候选解释器能否执行 `import sys`，识破 Windows 的微软商店跳转桩
+  （`python.exe` 只是跳转器，双击只会打开商店）；
+- `--check` 参数只报告检测结果，方便排障和写进文档。
+
+实测输出：
+
+```
+[ok] interpreter: python   version: 3.13.14
+--------------------------------------------
+[result] full support: web UI can start.
+```
+
+#### 顺带补的一个坑
+
+`dist/` 原本被 `.gitignore` 排除，意味着新克隆下来既没有离线版 HTML、也不一定装了 Python，
+而 README 第一条路径就是「双击 dist/...」。改成只忽略 `dist/*` 并放行那一个 HTML：
+离线版的全部价值就是「零依赖打开」，让它依赖 Python 来生成是自相矛盾的。
+
+#### 测试
+
+101 → 111 项。新增 `tests/test_compat.py`：校验器通过 + 校验器能报错（防止它变成摆设）、
+`requires-python` 与版本号一致、屏蔽 openpyxl 后核心包仍可导入、CLI 仍可用、
+导出接口返回 503 且带 `pip install openpyxl` 提示。
+
+顺带把 `test_exporter.py` 改成 `importorskip`——没装 openpyxl 的机器上应该跳过这组测试，
+而不是让整个套件在 collection 阶段就崩掉。
