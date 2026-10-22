@@ -6,7 +6,8 @@
 3. 历年回收   —— 2014—2025 年回收量、消费量、回收率、利用率
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
 5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
-6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
+6. 投入产出   —— 消耗金额、直接消耗系数、单位产值消耗、分省与企业采购金额
+7. 数据说明   —— 数据来源、口径与「官方 / 测算 / 估算 / 示例」区分，供复核
 
 依赖策略
 --------
@@ -18,7 +19,7 @@ openpyxl 只在真正要写工作簿时才导入。这样即使机器上没装 o
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from . import enterprises, regions
+from . import enterprises, io_table, regions
 from . import stats as stats_mod
 
 _INSTALL_HINT = (
@@ -256,7 +257,59 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "内置名录为示例数据（虚构名称），可在项目根目录放 data/enterprises.csv 覆盖。",
     )
 
-    # ---- 6. 数据说明 ----
+    # ---- 6. 投入产出 ----
+    ws6io = wb.create_sheet("投入产出")
+    st = _styles()
+    sp = io_table.spend(year)
+    dc = io_table.direct_coefficient(year)
+    uc = io_table.unit_consumption(year)
+
+    ws6io.append([f"{scope_name} 废纸消耗金额（投入产出视角，{year} 年）"])
+    ws6io.cell(row=1, column=1).font = st["title_font"]
+    ws6io.append(["口径：全国为官方投入产出表 + 协会年报；省级为分摊；地级市与企业为估算。"
+                  "金额按回收参考价计价，属纸厂废纸成本下限。"])
+    ws6io.cell(row=2, column=1).font = st["note_font"]
+
+    kv = [
+        ("废纸消耗量(万吨)", sp["tonnage"], sp["tonnage_basis"]),
+        ("加权参考价(元/吨)", sp["avg_price"], "分类结构加权，居民/回收站口径"),
+        ("废纸货值(亿元)", sp["amount"], sp["provenance"]),
+        ("直接消耗系数(%)",
+         "—" if dc["coefficient"] is None else dc["coefficient_pct"],
+         dc["note"]),
+        ("单位产值消耗(吨/万元)",
+         "—" if uc["value"] is None else uc["value"],
+         "消耗量 ÷ 营业收入"),
+    ]
+    ws6io.append(["指标", "数值", "说明"])
+    _style_header(ws6io, 3, 3)
+    for name, value, note in kv:
+        ws6io.append([name, value, note])
+
+    ws6io.append([])
+    ws6io.append([f"{scope_name} 分省消耗金额（亿元）"])
+    ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
+    ws6io.append(["排名", "省份", "占全国比重(%)", "金额(亿元)", "数据性质"])
+    head_row = ws6io.max_row
+    _style_header(ws6io, head_row, 5)
+    for r in io_table.province_spend(year)["rows"]:
+        ws6io.append([r["rank"], r["name"], r["share_pct"], r["amount"], r["provenance"]])
+
+    ws6io.append([])
+    ws6io.append(["企业采购金额（示例：年经手量 × 均价）"])
+    ws6io.cell(row=ws6io.max_row, column=1).font = st["title_font"]
+    ws6io.append(["企业", "省 / 市", "年经手量(万吨)", "金额(亿元)", "数据性质"])
+    head_row2 = ws6io.max_row
+    _style_header(ws6io, head_row2, 5)
+    for e in io_table.enterprise_spend(year)["rows"]:
+        ws6io.append([e["name"], f"{e['province']} / {e['city']}",
+                      e["volume"], e["amount"], e["provenance"]])
+
+    ws6io.column_dimensions["A"].width = 26
+    for col in ("B", "C", "D", "E"):
+        ws6io.column_dimensions[col].width = 20
+
+    # ---- 7. 数据说明 ----
     ws6 = wb.create_sheet("数据说明")
     ws6.append(["数据来源与口径说明"])
     ws6.cell(row=1, column=1).font = _styles()["title_font"]
@@ -279,7 +332,15 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         "  · 本工具提供全国与省级两级统计；市级、县级无公开权威数据，故不提供，避免误导。",
         "  · 企业名录带城市与经纬度，可在省级以下提供更细的空间视角，但企业样本不代表全量。",
         "",
-        "五、替换为真实数据",
+        "五、投入产出口径",
+        "  · 全国：官方。国家统计局全国投入产出表（42 部门）+ 中国造纸协会年度报告。",
+        "  · 省级：各省均编制本地区投入产出表；本工具的分省金额按回收量占比分摊，非实际采购分布。",
+        "  · 地级市：国家统计局明确「地级市暂不编制投入产出表」，本表按企业名录城市分布分摊，属估算。",
+        "  · 企业：不存在「企业投入产出表」，只有财务报表；本表金额 = 年经手量 × 市场均价，属示例估算。",
+        "  · 金额按回收参考价（居民/回收站口径）计价，不含分拣、打包、运输，",
+        "    因此是纸厂废纸成本的下限，不是到厂采购额；直接消耗系数同此口径。",
+        "",
+        "六、替换为真实数据",
         "  · 省级：修改 src/paper_recycle_agent/regions.py 的 SEEDS，为省份填入 reported 值。",
         "  · 历年：修改 src/paper_recycle_agent/stats.py 的 HISTORY。",
         "  · 分类占比：修改 CATEGORY_SHARES 的锚点年份数值。",

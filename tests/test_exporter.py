@@ -19,7 +19,8 @@ def _load(code="CN", year=2024):
 def test_sheets_present():
     wb = _load()
     assert wb.sheetnames == [
-        "省级统计", "分类回收", "历年回收", "废纸进口", "企业名录", "数据说明"
+        "省级统计", "分类回收", "历年回收", "废纸进口",
+        "企业名录", "投入产出", "数据说明"
     ]
 
 

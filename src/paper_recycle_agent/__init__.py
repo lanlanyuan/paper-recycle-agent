@@ -13,11 +13,11 @@ if sys.version_info < (3, 7):  # pragma: no cover - 仅在旧解释器上触发
         )
     )
 
-from . import (agent, classifier, data, enterprises, exporter, knowledge,  # noqa: E402
-               pricing, regions, stats)
+from . import (agent, classifier, data, enterprises, exporter, io_table,  # noqa: E402
+               knowledge, llm, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 __all__ = [
     "agent",
@@ -25,7 +25,9 @@ __all__ = [
     "data",
     "enterprises",
     "exporter",
+    "io_table",
     "knowledge",
+    "llm",
     "pricing",
     "regions",
     "stats",
