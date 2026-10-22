@@ -3,10 +3,12 @@
 import re
 from typing import Dict, Optional
 
-from . import classifier, pricing
+from . import classifier, data, pricing
 
 _GREETING = {"你好", "您好", "hi", "hello", "在吗", "在么"}
 _HELP = {"帮助", "help", "怎么用", "功能", "能做什么", "用法"}
+_DATA = {"年鉴", "行业数据", "回收量", "利用率", "进口", "标准", "分类标准",
+         "gb/t", "20811", "造纸", "废纸分几类", "废纸分类"}
 
 
 def _extract_weight(text: str) -> Optional[float]:
@@ -35,6 +37,10 @@ def respond(user_input: str) -> str:
     if any(k in text for k in _HELP):
         return _help_text()
 
+    # 年鉴 / 行业数据 / 分类标准类查询
+    if any(k in text for k in _DATA):
+        return data.summary_text()
+
     weight = _extract_weight(text)
     if weight is not None:
         return pricing.estimate(text, weight)["message"]
@@ -50,5 +56,6 @@ def _help_text() -> str:
             "1) 查询是否可回收：直接说物品名，如「纸箱」「报纸」「纸巾」。",
             "2) 估算回收价值：物品名 + 重量，如「办公用纸 3kg」「纸箱 5 斤」。",
             "3) 查看全部类别：输入「类别」。",
+            "4) 年鉴与行业数据：输入「年鉴」「行业数据」「废纸分类」「回收量」。",
         ]
     )
