@@ -8,14 +8,16 @@
   GET  /health          -> {"status": "ok"}
 """
 
+import io
 from pathlib import Path
 
 from fastapi import FastAPI, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from paper_recycle_agent import data as yearbook
+from paper_recycle_agent import regions
 from paper_recycle_agent import respond
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
@@ -49,6 +51,39 @@ def info() -> dict:
         "quality": yearbook.QUALITY_RULES,
         "sources": yearbook.SOURCES,
     }
+
+
+def _shallow(node: dict) -> dict:
+    return {k: v for k, v in node.items() if k != "children"}
+
+
+@app.get("/api/regions")
+def regions_tree() -> dict:
+    return regions.tree()
+
+
+@app.get("/api/stats")
+def stats(code: str = "CN") -> dict:
+    node = regions.get_node(code) or regions.get_node("CN")
+    children = regions.get_children(str(node["code"]))
+    return {
+        "node": _shallow(node),
+        "children": [_shallow(c) for c in children],
+        "breadcrumb": regions.breadcrumb(str(node["code"])),
+    }
+
+
+@app.get("/export.xlsx")
+def export(code: str = "CN") -> StreamingResponse:
+    node = regions.get_node(code) or regions.get_node("CN")
+    content = regions.export_xlsx(str(node["code"]))
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": 'attachment; filename="paper_recycle_stats.xlsx"'},
+    )
 
 
 @app.post("/chat")
