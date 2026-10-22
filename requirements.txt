@@ -3,3 +3,4 @@
 pytest>=7.0          # 单元测试（CI 使用）
 fastapi>=0.110       # 图形界面 / HTTP 对话服务（app/server.py）
 uvicorn>=0.29        # 运行 FastAPI 服务：uvicorn app.server:app --reload
+openpyxl>=3.1        # 导出 Excel（/export.xlsx）
