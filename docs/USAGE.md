@@ -57,3 +57,60 @@ uvicorn app.server:app --reload
 
 - `POST /chat`  body `{"message": "纸箱 2kg"}` → `{"reply": "..."}`
 - `GET /health` → `{"status": "ok"}`
+
+## 历年数据与分类数据（v1.3.0 新增）
+
+### 命令行
+
+```bash
+# 历年回收量 / 回收率 / 利用率 / 废纸进口量
+PYTHONPATH=src python -m paper_recycle_agent.cli history
+
+# 按八大类拆分回收量（可指定年份）
+PYTHONPATH=src python -m paper_recycle_agent.cli catstats 2024
+PYTHONPATH=src python -m paper_recycle_agent.cli catstats 2020
+
+# 区域统计（只支持全国与省级）
+PYTHONPATH=src python -m paper_recycle_agent.cli region 全国
+PYTHONPATH=src python -m paper_recycle_agent.cli region 山东
+
+# 导出多表 Excel
+PYTHONPATH=src python -m paper_recycle_agent.cli export 全国 --year 2024 --out 全国.xlsx
+PYTHONPATH=src python -m paper_recycle_agent.cli export 山东 --year 2020 --out 山东2020.xlsx
+```
+
+### 对话里可以这么问
+
+| 想查什么 | 输入示例 |
+| --- | --- |
+| 历年趋势 | 「历年数据」「近五年趋势」「以前年份回收量」 |
+| 按类别看回收量 | 「分类回收数据」「八大类占比」「2020 年分类数据」 |
+| 某省回收量 | 「山东省回收量」「广东排名」 |
+| 全国统计 | 「全国统计」「回收率多少」 |
+| 分类标准（技术要求） | 「废纸分类」 |
+
+### 图形界面三个标签页
+
+1. **区域统计**：省级回收量排名（带条形图），点击任意行查看该省明细，可返回全国。
+   表中「数据」列标 `报道` 或 `测算`，一眼看出哪条能引用。
+2. **历年数据**：年份选择器 + 回收量走势 + 明细表 + 废纸进口量条形图。
+3. **分类结构**：八大类占比条形图 + 回收量/货值表；页面底部折叠区是 GB/T 20811-2018 分类技术要求。
+
+### 导出的 Excel 长什么样
+
+一个 `.xlsx`，五张工作表：
+
+| 工作表 | 内容 |
+| --- | --- |
+| 省级统计 | 34 个省级行政区排名、回收量、占比、回收率、利用率、数据性质 + 合计行 |
+| 分类回收 | 八大类占比、回收量、参考价、估算货值、主要去向 + 合计行 |
+| 历年回收 | 2014—2025 年回收量、消费量、同比、回收率、利用率、纸及纸板产量 |
+| 废纸进口 | 2017—2025 年进口量 |
+| 数据说明 | 来源、口径区分、已知差异、如何替换真实数据 |
+
+选中的是某个省时，「省级统计」表只导出该省一行；完整对照请选「全国」再导出。
+
+### 注意
+
+- 本工具只提供**全国**与**省级**两级统计，市级、县级数据已下线（无公开权威来源）。
+- 分类回收量是「结构占比 × 官方回收量」的**估算值**，不是官方分项统计。

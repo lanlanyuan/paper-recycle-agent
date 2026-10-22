@@ -11,19 +11,34 @@
 - 关键词分类引擎，多命中智能排序
 - 重量 × 单价回收估价，支持「斤」折算
 - 自然语言对话（问候 / 帮助 / 估价 / 分类）
-- 命令行 `chat` / `classify` / `price` / `categories` / `info`
+- 命令行 `chat` / `classify` / `price` / `categories` / `info` / `history` / `catstats` / `region` / `export`
 - **接入《中国造纸年鉴》废纸分类（GB/T 20811-2018，8 大类 42 小类）与 2024 行业数据**
-- **国家 → 省 → 市 → 县区四级区域统计**，界面可逐级下钻
-- **一键导出 Excel**（供统计局人员直接使用）
+- **全国 + 省级两级区域统计**（不再提供市/县数据，见下方「数据口径」）
+- **历年数据 2014—2025**：回收量、回收率、利用率、废纸进口量
+- **按八大类拆分的分类回收量**（占比 × 回收量，含参考价与估算货值）
+- **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 数据说明 五张表）
 - **对话支持语音输入**（浏览器 Web Speech API，无需第三方 ASR）
-- **Web 图形界面**：FastAPI 聊天页 + 区域统计面板
+- **Web 图形界面**：FastAPI 聊天页 + 区域/历年/分类三个标签页
 - GitHub Actions 多版本 CI
+
+## 数据口径（重要）
+
+| 维度 | 数据性质 | 说明 |
+|---|---|---|
+| 全国 2024 | 官方 | 中国造纸协会《中国造纸工业2024年度报告》 |
+| 省级回收量 | 报道 + 测算 | 山东 763、广东 733 为公开报道值；其余 32 个省级行政区为梯队测算并归一化到全国总量 |
+| 历年 2014—2025 | 官方 | 中国造纸协会年度报告、《中国造纸》统计表；2025 为初步核算 |
+| 八大类占比 | 估算 | 官方未逐类公布回收量，按 2015/2020/2025 三锚点插值 |
+
+**为什么不提供市、县数据**：市级、县级废纸回收量没有公开的权威逐级统计。早期版本用权重分摊"造"出了市县数据，容易让使用者误以为是真实统计，v1.3.0 起已下线，只保留可核验的两级。替换真实数据的方法见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
 
 ## 快速开始
 ```bash
-pip install -r requirements.txt   # 含 fastapi / uvicorn
+pip install -r requirements.txt   # 含 fastapi / uvicorn / openpyxl
 # 命令行
-PYTHONPATH=src python -m paper_recycle_agent.cli chat
+PYTHONPATH=src python -m paper_recycle_agent.cli history
+PYTHONPATH=src python -m paper_recycle_agent.cli catstats 2024
+PYTHONPATH=src python -m paper_recycle_agent.cli export 山东 --year 2024 --out 山东.xlsx
 # 图形界面（浏览器打开 http://localhost:8000）
 uvicorn app.server:app --reload
 ```
@@ -31,19 +46,21 @@ uvicorn app.server:app --reload
 ## 项目结构
 ```
 paper-recycle-agent/
-├── src/paper_recycle_agent/   # 核心包（纯标准库）
-│   ├── knowledge.py           # 知识库（9 类实用回收指引）
+├── src/paper_recycle_agent/   # 核心包（业务逻辑纯标准库）
+│   ├── knowledge.py           # 知识库（9 类实用回收指引 + 参考价）
 │   ├── data.py                # 年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
-│   ├── regions.py             # 国家→省→市→县区四级统计（含 Excel 导出）
+│   ├── stats.py               # 历年序列 + 八大类占比与分类回收量
+│   ├── regions.py             # 全国 + 省级两级统计
+│   ├── exporter.py            # 多表 Excel 导出（openpyxl）
 │   ├── classifier.py          # 分类引擎
 │   ├── pricing.py             # 估价
 │   ├── agent.py               # 对话引擎
 │   └── cli.py                 # 命令行
-├── tests/                     # pytest 单元测试
-├── app/server.py              # FastAPI 服务（图形界面 + 区域统计 + 导出）
-├── app/static/index.html      # 聊天界面（区域下钻 / 导出 / 语音输入）
+├── tests/                     # pytest 单元测试（60 项）
+├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出）
+├── app/static/index.html      # 聊天界面（区域 / 历年 / 分类三标签页 + 语音输入）
 ├── run.py                     # 读取 PORT 的统一启动入口
-├── docs/                      # 使用/贡献/开发日志/代码清单
+├── docs/                      # 使用/贡献/开发日志/代码清单/数据来源
 └── .github/workflows/ci.yml   # CI
 ```
 
