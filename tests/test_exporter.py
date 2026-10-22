@@ -1,8 +1,13 @@
 import io
 
-from openpyxl import load_workbook
+import pytest
 
-from paper_recycle_agent import exporter, regions
+# openpyxl 是可选依赖：没装的机器上跳过本文件，而不是让整个测试套件崩掉
+pytest.importorskip("openpyxl", reason="导出测试需要 openpyxl")
+
+from openpyxl import load_workbook  # noqa: E402
+
+from paper_recycle_agent import exporter, regions  # noqa: E402
 
 
 def _load(code="CN", year=2024):

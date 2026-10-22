@@ -7,36 +7,81 @@
 4. 废纸进口   —— 2017—2025 年废纸进口量（体现禁废令效果）
 5. 企业名录   —— 企业名称、城市、类型、主营大类、年回收量、经纬度
 6. 数据说明   —— 数据来源、口径与「官方 / 测算 / 示例」区分，供复核
+
+依赖策略
+--------
+openpyxl 只在真正要写工作簿时才导入。这样即使机器上没装 openpyxl，
+`import paper_recycle_agent`、命令行对话、离线 HTML 版都能正常工作，
+只有点击「导出 Excel」时才会提示安装。
 """
 
 from io import BytesIO
 from typing import Dict, List, Optional
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-
 from . import enterprises, regions
 from . import stats as stats_mod
 
-HEADER_FILL = PatternFill("solid", fgColor="2F7D4F")
-HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
-TITLE_FONT = Font(bold=True, size=13, color="1F2329")
-NOTE_FONT = Font(size=10, color="6B7280")
-THIN = Side(style="thin", color="D9D9D9")
-BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+_INSTALL_HINT = (
+    "导出 Excel 需要 openpyxl，但当前环境没有安装。\n"
+    "请执行：pip install openpyxl\n"
+    "若无法联网安装，可改用「零依赖离线版」：dist/paper-recycle-offline.html，"
+    "其中自带 CSV 导出，可直接用 Excel 打开。"
+)
+
+# 惰性构造的样式缓存，避免在模块导入期就依赖 openpyxl
+_STYLE_CACHE: Dict[str, object] = {}
+
+
+def available() -> bool:
+    """当前环境是否具备导出 Excel 的能力。"""
+    try:
+        import openpyxl  # noqa: F401
+    except Exception:  # pragma: no cover - 取决于运行环境
+        return False
+    return True
+
+
+def _require_openpyxl():
+    """导入 openpyxl，失败时抛出带安装指引的异常。"""
+    try:
+        import openpyxl
+    except Exception as exc:  # pragma: no cover - 取决于运行环境
+        raise RuntimeError(_INSTALL_HINT) from exc
+    return openpyxl
+
+
+def _styles() -> Dict[str, object]:
+    """首次调用时构造样式对象并缓存。"""
+    if _STYLE_CACHE:
+        return _STYLE_CACHE
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    thin = Side(style="thin", color="D9D9D9")
+    _STYLE_CACHE.update({
+        "header_fill": PatternFill("solid", fgColor="2F7D4F"),
+        "header_font": Font(color="FFFFFF", bold=True, size=11),
+        "title_font": Font(bold=True, size=13, color="1F2329"),
+        "note_font": Font(size=10, color="6B7280"),
+        "border": Border(left=thin, right=thin, top=thin, bottom=thin),
+        "center": Alignment(horizontal="center", vertical="center", wrap_text=True),
+        "left": Alignment(wrap_text=False, vertical="center"),
+    })
+    return _STYLE_CACHE
 
 
 def _style_header(ws, row: int, ncols: int) -> None:
+    st = _styles()
     for col in range(1, ncols + 1):
         cell = ws.cell(row=row, column=col)
-        cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = BORDER
+        cell.fill = st["header_fill"]
+        cell.font = st["header_font"]
+        cell.alignment = st["center"]
+        cell.border = st["border"]
 
 
 def _autofit(ws, widths: List[int]) -> None:
+    from openpyxl.utils import get_column_letter
+
     for i, width in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
 
@@ -44,11 +89,12 @@ def _autofit(ws, widths: List[int]) -> None:
 def _write_sheet(ws, title: str, headers: List[str], rows: List[List[object]],
                  widths: List[int], note: Optional[str] = None) -> None:
     """统一的「标题 + 表头 + 数据 + 备注」写入。"""
+    st = _styles()
     ws.append([title])
-    ws.cell(row=1, column=1).font = TITLE_FONT
+    ws.cell(row=1, column=1).font = st["title_font"]
     if note:
         ws.append([note])
-        ws.cell(row=2, column=1).font = NOTE_FONT
+        ws.cell(row=2, column=1).font = st["note_font"]
         header_row = 3
     else:
         header_row = 2
@@ -58,7 +104,7 @@ def _write_sheet(ws, title: str, headers: List[str], rows: List[List[object]],
         ws.append(row)
     for r in range(header_row + 1, ws.max_row + 1):
         for c in range(1, len(headers) + 1):
-            ws.cell(row=r, column=c).border = BORDER
+            ws.cell(row=r, column=c).border = st["border"]
     ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
     _autofit(ws, widths)
 
@@ -84,13 +130,18 @@ def _province_rows() -> List[List[object]]:
 
 
 def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes:
-    """生成多表工作簿，返回 .xlsx 字节流。"""
+    """生成多表工作簿，返回 .xlsx 字节流。
+
+    :raises RuntimeError: 环境缺少 openpyxl 时，异常信息含安装指引。
+    """
+    openpyxl = _require_openpyxl()
+
     node = regions.get_node(code) or regions.ROOT
     node_code = str(node["code"])
     is_national = node["level"] == "national"
     scope_name = str(node["name"])
 
-    wb = Workbook()
+    wb = openpyxl.Workbook()
 
     # ---- 1. 省级统计 ----
     ws1 = wb.active
@@ -208,7 +259,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
     # ---- 6. 数据说明 ----
     ws6 = wb.create_sheet("数据说明")
     ws6.append(["数据来源与口径说明"])
-    ws6.cell(row=1, column=1).font = TITLE_FONT
+    ws6.cell(row=1, column=1).font = _styles()["title_font"]
     lines = [
         "一、数据来源",
         *[f"  · {s}" for s in stats_mod.SOURCES],
@@ -238,7 +289,7 @@ def build_workbook(code: str = "CN", year: int = regions.NATIONAL_YEAR) -> bytes
         ws6.append([line])
     ws6.column_dimensions["A"].width = 110
     for r in range(2, ws6.max_row + 1):
-        ws6.cell(row=r, column=1).alignment = Alignment(wrap_text=False, vertical="center")
+        ws6.cell(row=r, column=1).alignment = _styles()["left"]
 
     buf = BytesIO()
     wb.save(buf)
