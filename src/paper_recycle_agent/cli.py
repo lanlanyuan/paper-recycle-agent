@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from . import agent, classifier, pricing
+from . import agent, classifier, data, pricing
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -18,6 +18,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("text", help="物品描述")
     pr.add_argument("weight", type=float, help="重量(kg)")
     sub.add_parser("categories", help="列出所有类别")
+    sub.add_parser("info", help="废纸分类标准与行业数据")
     return p
 
 
@@ -33,6 +34,8 @@ def main(argv=None) -> int:
         for c in classifier.list_categories():
             tag = "可回收" if c["recyclable"] else "不可回收"
             print(f"- {c['name']} [{tag}]")
+    elif args.cmd == "info":
+        print(data.summary_text())
     else:
         _chat_loop()
     return 0

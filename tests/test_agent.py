@@ -24,3 +24,14 @@ def test_respond_price_with_weight():
 def test_respond_jin_conversion():
     out = agent.respond("纸箱 2斤")
     assert "回收价值" in out
+
+
+def test_respond_yearbook_query():
+    out = agent.respond("废纸分类标准")
+    assert "GB/T 20811" in out
+    assert "6971" in out
+
+
+def test_respond_industry_data():
+    out = agent.respond("回收量多少")
+    assert "回收量" in out or "6971" in out
