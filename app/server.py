@@ -101,7 +101,8 @@ def stats(code: str = "CN", year: Optional[int] = None) -> dict:
 
     return {
         "node": _shallow(node),  # type: ignore[arg-type]
-        "children": [_shallow(c) for c in regions.get_children(node_code)],
+        # 始终返回全部省份，便于在选中某省后仍能看到完整排名并切换
+        "children": [_shallow(c) for c in regions.get_children("CN")],
         "breadcrumb": regions.breadcrumb(node_code),
         "year": year,
         "years": sorted(valid_years),
