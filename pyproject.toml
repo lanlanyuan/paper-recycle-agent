@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.2.0"
+version = "1.2.1"
 description = "废纸回收 Agent 对话助手：分类、估价与交互（纯标准库）"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -34,7 +34,7 @@ class ChatReq(BaseModel):
 @app.get("/index.html", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @app.get("/favicon.ico", include_in_schema=False)

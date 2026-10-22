@@ -67,7 +67,7 @@
 </style>
 </head>
 <body>
-<header>🪨 废纸回收 Agent 对话助手 <span class="sub">四级区域统计 · 分类估价 · 语音输入 · Excel 导出</span></header>
+<header>🪨 废纸回收 Agent 对话助手 <span class="sub">v1.2.1 · 四级区域统计 · 分类估价 · 语音输入 · Excel 导出</span></header>
 <div class="layout">
   <div class="chat">
     <div class="messages" id="messages"></div>
@@ -208,8 +208,32 @@
     if (breadcrumb.length > 1) loadStats(breadcrumb[breadcrumb.length - 2].code);
   }
 
-  function exportExcel() {
-    window.location.href = `/export.xlsx?code=${encodeURIComponent(currentCode)}`;
+  async function exportExcel() {
+    const btn = document.getElementById("exportBtn");
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "导出中…";
+    const url = `/export.xlsx?code=${encodeURIComponent(currentCode)}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const obj = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = obj;
+      a.download = `废纸回收统计_${currentCode}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(obj), 3000);
+      btn.textContent = "已导出 ✓";
+      setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1500);
+    } catch (e) {
+      // 回退：新窗口打开下载地址
+      window.open(url, "_blank");
+      btn.textContent = "已打开下载";
+      setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1500);
+    }
   }
 
   async function loadInfo() {
