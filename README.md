@@ -202,7 +202,7 @@ paper-recycle-agent/
 
 ## 连续开发：这套历史是怎么来的，以及怎么自己查
 
-本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：83 个提交、16 个 feature/fix 分支、
+本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：80+ 个提交、16 个 feature/fix 分支、
 16 个合并提交、7 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
 合并提交里带 `closes #N` 与 PR 编号。
 
@@ -246,7 +246,7 @@ CI 每次都会跑：
 
 ## 上传到 GitHub：怎么拿到 Repo 地址
 
-本地仓库已经就绪（83 个提交、16 个合并、7 个标签），缺的只是一个远端。
+本地仓库已经就绪（80+ 个提交、16 个合并、7 个标签），缺的只是一个远端。
 
 > 需要**一步不落的手把手版本**（含每个报错怎么处理）？
 > 见 [docs/UPLOAD_TO_GITHUB.md](docs/UPLOAD_TO_GITHUB.md)。下面是精简版。
@@ -275,7 +275,8 @@ bash tools/push_to_github.sh 你的GitHub用户名
 1. **体检**——是不是 git 仓库、工作区有没有未提交改动、有没有把 `config/llm.json`
    或 `data/enterprises.csv` 这类含密钥/私有数据的文件误提交（这条是硬拦截）
 2. **配远端**——`origin` 已存在就 `set-url`，不会因为重复 `add` 而中断
-3. **推送**——`main` 分支 + 全部 7 个标签
+3. **推送**——`main` + 16 个 `feature/*`/`fix/*` 分支 + 7 个标签（分支必须一起推，
+   否则 GitHub 上只剩线性历史，看不出分支开发的过程）
 4. **收尾**——把 README 顶部的 CI 徽章从注释占位符换成真实地址并推一版
 
 不带参数先跑一次可以只看指引，不碰任何东西：
@@ -295,8 +296,12 @@ https://github.com/你的GitHub用户名/paper-recycle-agent
 ```bash
 git remote add origin https://github.com/你的用户名/paper-recycle-agent.git
 git push -u origin main
-git push origin --tags
+git push origin --all      # 16 个 feature/fix 分支，别漏
+git push origin --tags     # 7 个版本标签
 ```
+
+`--all` 不能省：只推 `main` 的话 GitHub 上只有一个线性历史，
+看不到「开分支 → 分主题提交 → 合并」的过程。
 
 ### 认证：密码位置要填 Token，不是登录密码
 

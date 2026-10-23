@@ -171,10 +171,13 @@ bash tools/push_to_github.sh 你的GitHub用户名
 ```bash
 git remote add origin https://github.com/你的用户名/paper-recycle-agent.git
 git push -u origin main
-git push origin --tags
+git push origin --all      # 16 个 feature/fix 分支，别漏
+git push origin --tags     # 7 个版本标签
 ```
 
-三行分别对应：配远端、推主分支、推 7 个标签。
+**`--all` 这一行不能省**。只推 `main` 的话，GitHub 上只有一个线性历史，
+别人看不到「开分支 → 分主题提交 → 合并」的过程，连续开发的证据就丢了一半。
+推上去之后 `/branches` 页面应该能看到 16 个分支。
 
 > 如果 `git remote add` 报 `remote origin already exists`，说明之前配过，
 > 用 `git remote set-url origin https://github.com/你的用户名/paper-recycle-agent.git` 改地址。
@@ -195,8 +198,10 @@ https://github.com/你的用户名/paper-recycle-agent
 | --- | --- |
 | 文件列表 | `README.md`、`src/`、`app/`、`docs/`、`tools/` 等 60 个文件 |
 | README 渲染 | 中文正常显示，徽章不是裂图，有「上传到 GitHub」这一节 |
-| 提交数 | 文件列表右上方显示 `83 Commits` |
-| 标签 | 右侧栏 `Releases` 旁边或 `/tags` 页面能看到 v1.0.0 ~ v1.6.2 共 7 个 |
+| 提交数 | 文件列表右上方显示 `80+ Commits` |
+| **分支数** | `/branches` 页面能看到 16 个 `feature/*` 或 `fix/*` 分支（**这是「连续开发」最直观的证据**） |
+| 标签 | `/tags` 页面能看到 v1.0.0 ~ v1.6.2 共 7 个 |
+| 合并轨迹 | `/network` 页面能看到分支线汇入 main，不是一条直线 |
 | 默认分支 | 左上角显示 `main` |
 
 再看一眼 Actions（可选）：
@@ -311,11 +316,12 @@ cat ~/.ssh/id_ed25519.pub                  # 复制输出的整行
 git remote set-url origin git@github.com:你的用户名/paper-recycle-agent.git
 ssh -T git@github.com     # 看到 "Hi 你的用户名!" 就成了
 git push -u origin main
+git push origin --all --tags
 ```
 
 ---
 
-## 可选：让 83 个提交都关联到你的账号
+## 可选：让全部历史提交都关联到你的账号
 
 现在的提交邮箱是 `dev@example.com`（占位符），推到 GitHub 后归属不到你。
 如果这个仓库要当作品集展示，改一下更专业。

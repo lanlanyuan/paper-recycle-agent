@@ -110,7 +110,8 @@ fi
 
 # ---------------------------------------------------------------- 3. 推送
 
-step "[3/4] 推送 main 与全部 tag"
+branch_count="$(git for-each-ref --format='%(refname:short)' refs/heads | wc -l | tr -d ' ')"
+step "[3/4] 推送 ${branch_count} 个分支与全部 tag"
 dim "  首次推送会要求输入 GitHub 用户名与 Personal Access Token（不是账号密码）"
 dim "  没有 token 的话：GitHub → Settings → Developer settings → Personal access tokens → Generate new token (classic)，勾 repo 权限"
 
@@ -122,11 +123,18 @@ if ! git push -u origin main; then
   exit 2
 fi
 
+# feature/fix 分支必须一起推：只推 main 的话，GitHub 上只有一个线性历史，
+# 看不出「开分支 → 分主题提交 → 合并」的过程，连续开发的证据就丢了一半。
+if ! git push origin --all; then
+  red "  分支推送失败（main 已推成功）。单独重试：git push origin --all"
+  exit 2
+fi
+
 if ! git push origin --tags; then
   red "  标签推送失败（分支已推成功）。单独重试：git push origin --tags"
   exit 2
 fi
-green "  分支与标签均已推送"
+green "  ${branch_count} 个分支与 $(git tag | wc -l | tr -d ' ') 个标签均已推送"
 
 # ---------------------------------------------------------------- 4. 收尾
 
