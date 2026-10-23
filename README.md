@@ -202,8 +202,8 @@ paper-recycle-agent/
 
 ## 连续开发：这套历史是怎么来的，以及怎么自己查
 
-本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：75 个提交、15 个 feature 分支、
-6 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
+本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：80 个提交、16 个 feature/fix 分支、
+16 个合并提交、6 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
 合并提交里带 `closes #N` 与 PR 编号。
 
 但**光说"我是连续开发的"没有意义**，得能被核查。所以：
@@ -237,12 +237,93 @@ CI 每次都会跑：
 1. **2026-10-01 → 10-21 的 19 个提交是按开发顺序补录的**，时间戳为重建（所以都落在整点）；
    10-22 起的 56 个提交是真实连续开发留下的，含秒级时间戳。补录部分保留了真实的
    代码演进顺序与踩坑记录，但**不应被当作"每天在写代码"的证据**。
-2. **commit message 里的 `Merge PR #N`、`closes #N` 是本地留档**。本仓库目前没有远端，
-   GitHub 上并不存在这些 PR / Issue。把仓库推上去之后，可以运行
-   `bash tools/publish_to_github.sh` 用 `gh` 把 30 个 Issue、6 个里程碑真实建出来，
-   让这些编号真正指向对象——**在那之前，请不要对外声称"有 30 个 Issue"**。
+2. **commit message 里的 `Merge PR #N`、`closes #N` 是本地留档**。把仓库推上去之前，
+   GitHub 上并不存在这些 PR / Issue。推送后运行 `bash tools/publish_to_github.sh --apply`，
+   用 `gh` 把 30 个 Issue、7 个里程碑真实建出来，编号才会指向对象——
+   **在那之前，请不要对外声称"有 30 个 Issue"**。
 
 这两条写在这里而不是藏起来，是因为「过程可信」的前提是**经得起核查**，不是看起来像。
+
+## 上传到 GitHub：怎么拿到 Repo 地址
+
+本地仓库已经就绪（80 个提交、16 个合并、6 个标签），缺的只是一个远端。
+
+### 第一步：建一个**空**仓库
+
+打开 https://github.com/new ，只填两样：
+
+| 字段 | 填什么 |
+| --- | --- |
+| Repository name | `paper-recycle-agent` |
+| Visibility | Public（作品集展示）/ Private 都行 |
+
+**下面三个勾选框全部不要勾**：`Add a README file`、`Add .gitignore`、`Choose a license`。
+勾了任何一个，远端就会先有一个提交，`git push` 会被 `non-fast-forward` 拒绝——
+这是新手第一次上传最常见的失败原因。
+
+### 第二步：一键推送
+
+```bash
+bash tools/push_to_github.sh 你的GitHub用户名
+```
+
+脚本按顺序做四件事，任一步失败就停下并说清原因：
+
+1. **体检**——是不是 git 仓库、工作区有没有未提交改动、有没有把 `config/llm.json`
+   或 `data/enterprises.csv` 这类含密钥/私有数据的文件误提交（这条是硬拦截）
+2. **配远端**——`origin` 已存在就 `set-url`，不会因为重复 `add` 而中断
+3. **推送**——`main` 分支 + 全部 6 个标签
+4. **收尾**——把 README 顶部的 CI 徽章从注释占位符换成真实地址并推一版
+
+不带参数先跑一次可以只看指引，不碰任何东西：
+
+```bash
+bash tools/push_to_github.sh          # 只打印步骤
+```
+
+推送成功后，你的 Repo 地址就是：
+
+```
+https://github.com/你的GitHub用户名/paper-recycle-agent
+```
+
+### 手动方式（不想用脚本）
+
+```bash
+git remote add origin https://github.com/你的用户名/paper-recycle-agent.git
+git push -u origin main
+git push origin --tags
+```
+
+### 认证：密码位置要填 Token，不是登录密码
+
+2021 年起 GitHub 关闭了密码认证。`git push` 弹出账号密码框时：
+
+- 用户名 → GitHub 用户名
+- 密码 → **Personal Access Token**（Settings → Developer settings →
+  Personal access tokens → Tokens (classic) → Generate new token，勾 `repo` 权限）
+
+想免掉每次输入，用 SSH 更省事：
+
+```bash
+ssh-keygen -t ed25519 -C "你的邮箱"      # 一路回车
+cat ~/.ssh/id_ed25519.pub                # 复制内容到 GitHub → Settings → SSH keys
+git remote set-url origin git@github.com:你的用户名/paper-recycle-agent.git
+```
+
+### 第三步：让 `closes #26` 真的有东西可指（可选）
+
+需要 [gh CLI](https://cli.github.com/)：
+
+```bash
+gh auth login
+bash tools/publish_to_github.sh          # 预演，看会建哪些 Issue
+bash tools/publish_to_github.sh --apply  # 真的创建
+```
+
+脚本会按 `docs/ISSUES.md` 里的顺序建 #1–#30 与 7 个里程碑。**必须在仓库还没有
+任何 Issue/PR 时跑**——Issue 编号是仓库级序列，与 PR 共享，一旦有别的对象占号就对不上了。
+
 
 ## 文档
 - [使用说明](docs/USAGE.md)
