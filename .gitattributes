@@ -1,0 +1,18 @@
+# 统一换行符，避免 Windows 上 CRLF / LF 混用导致 diff 噪音与脚本无法执行
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，否则 cmd 解析会出问题
+*.bat text eol=crlf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.xlsx binary
+*.zip binary
+*.bundle binary
+
+# 导出的单文件 HTML 是构建产物，diff 噪音大，折叠展示
+dist/*.html linguist-generated=true
+docs/CODE_LISTING.md linguist-generated=true
