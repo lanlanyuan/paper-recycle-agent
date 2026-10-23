@@ -29,6 +29,11 @@ jobs:
       - name: Check Python 3.7 compatibility
         run: python tools/check_compat.py
 
+      # 有效代码 LOC 不只是报数，还要守住「没有虚增」：
+      # 生成物混入、压缩代码、第三方 vendor、超长内嵌数据都会让 --check 失败
+      - name: Count effective LOC
+        run: python tools/count_loc.py --check
+
       - name: Check git history consistency
         run: python tools/check_history.py
 

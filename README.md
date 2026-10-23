@@ -195,6 +195,40 @@ paper-recycle-agent/
 └── .github/workflows/ci.yml       CI
 ```
 
+## 代码规模：有效代码 LOC
+
+不按「文件多少行」报数，按**有效代码行**算——空行、注释、文档字符串、
+内嵌模板全部剔除。数字截至 v1.6.6：
+
+| 层级 | 文件数 | 物理行 | 有效代码行 |
+| --- | ---: | ---: | ---: |
+| 核心领域逻辑（`src/paper_recycle_agent/`） | 13 | 2741 | 2043 |
+| Web 层（`app/` + `run.py`） | 3 | 1952 | 1680 |
+| 测试（`tests/` + `conftest.py`） | 14 | 1490 | 969 |
+| 工具脚本（`tools/`） | 6 | 1726 | 790 |
+| **合计** | **36** | **7909** | **5482** |
+
+三类内容明确**不计入**，理由写清楚而不是悄悄略过：
+
+| 不计入 | 为什么 |
+| --- | --- |
+| `dist/paper-recycle-offline.html` | 由 `tools/build_offline.py` 构建，计入即重复计数 |
+| `docs/CODE_LISTING.md` | 由 `tools/gen_code_listing.py` 生成，是源码的镜像 |
+| `tools/build_offline.py` 里的 641 行 `TEMPLATE` 字符串 | 内嵌的整页 HTML，是构建产物不是逻辑 |
+
+```bash
+python tools/count_loc.py            # 重新统计，数字应完全一致
+python tools/count_loc.py --json     # 机审用的结构化数据
+python tools/count_loc.py --check    # CI 用：有虚增迹象时退出码 1
+```
+
+`--check` 会顺带做四项卫生检查：**无第三方 vendor 目录、无 `.min.js` 压缩代码、
+无超长行、内嵌模板已单独归类**——正好对应评审最关心的四类虚增。
+统计器自身有 17 项测试（`tests/test_count_loc.py`）钉住每条判定规则，
+包括「行尾注释所在行仍算代码」「模块 docstring 再长也不是模板」这类容易算错的边界。
+
+完整口径、逐文件明细与排除清单见 [docs/EFFECTIVE_LOC.md](docs/EFFECTIVE_LOC.md)。
+
 ## 连续开发：这套历史是怎么来的，以及怎么自己查
 
 本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：80+ 个提交、16 个 feature/fix 分支、
