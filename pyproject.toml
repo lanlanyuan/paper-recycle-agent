@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.6.2"
+version = "1.6.4"
 description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7

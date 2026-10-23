@@ -1,5 +1,41 @@
 # 更新日志（CHANGELOG）
 
+## v1.6.4 (2026-10-23)
+**修 Token 权限说明：含 workflow 文件的仓库必须多勾一个 `workflow`。**
+
+用户实际推送时被拒：
+
+```
+! [remote rejected] main -> main (refusing to allow a Personal Access Token
+  to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)
+```
+
+根因是本文档和 README 都写着「Token 只勾 `repo` 这一个」——**这句是错的**。
+本仓库含 `.github/workflows/ci.yml`，GitHub 要求写工作流文件单独授权，
+只有 `repo` 的 Token 连改 README 都推不上去。
+
+- **文档改正**
+  - `docs/UPLOAD_TO_GITHUB.md` 第 3 步：`Select scopes` 改为勾 `repo` + `workflow`，
+    新增「为什么必须多勾一个 workflow」小节，含完整报错原文与 fine-grained token 的对应设置
+  - 报错对照表新增该错误条目：说明它不是密码错（重输 Token 无效），
+    给出「给现有 Token 补权限」（Token 字符串不变、凭据不用清）与「重新生成」两条路径
+  - README 认证小节同步改正，并链到对照表
+- **脚本加固**
+  - `push_to_github.sh` 体检阶段检测 `.github/workflows/`，命中就提前提示需要两个权限
+  - 推送失败时捕获完整输出并识别该错误，直接打印修法，退出码 3（与普通失败的 2 区分）
+  - 新增 `warn` / `yellow` 输出函数
+
+## v1.6.3 (2026-10-23)
+**推送范围补全，并把「连续开发」从自述改成逐项对照。**
+
+- `push_to_github.sh` 补 `git push origin --all`——原来只推 `main` + tags，
+  16 个 `feature/*`、`fix/*` 分支全留在本地，GitHub 上 `/branches` 与 `/network`
+  看不到分支开发的过程，等于把证据丢了一半
+- README 与 `docs/REPO_PROVENANCE.md` 新增「对照五项要素」表：
+  连续 commit ✅ / feature 分支 ✅ / PR ⚠️ 形似 / CI ❌ / Issue ❌，
+  并写明 PR 一项**永远补不了**（GitHub 不允许事后创建 PR）
+- 提交数改为区间表述，避免每提交一次就要改文档
+
 ## v1.6.2 (2026-10-23)
 **准备上传 GitHub：修 README 破图、模板结构、一键推送脚本。**
 

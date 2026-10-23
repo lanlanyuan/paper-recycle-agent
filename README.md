@@ -326,7 +326,13 @@ git push origin --tags     # 7 个版本标签
 
 - 用户名 → GitHub 用户名
 - 密码 → **Personal Access Token**（Settings → Developer settings →
-  Personal access tokens → Tokens (classic) → Generate new token，勾 `repo` 权限）
+  Personal access tokens → Tokens (classic) → Generate new token，勾 **`repo` + `workflow`** 两个权限）
+
+> **`workflow` 不能漏**。本仓库含 `.github/workflows/ci.yml`，GitHub 要求写工作流文件
+> 单独授权。只勾 `repo` 会被拒：
+> `refusing to allow a Personal Access Token to create or update workflow ... without workflow scope`。
+> 这是权限范围问题，不是密码错，重输 Token 无效。补勾方法见
+> [docs/UPLOAD_TO_GITHUB.md](docs/UPLOAD_TO_GITHUB.md#refusing-to-allow-a-personal-access-token-to-create-or-update-workflow--without-workflow-scope)。
 
 想免掉每次输入，用 SSH 更省事：
 

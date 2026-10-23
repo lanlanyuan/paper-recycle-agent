@@ -120,9 +120,33 @@ fatal: Authentication failed for 'https://github.com/...'
 5. 填写：
    - `Note`：随便写，比如 `paper-recycle-agent push`
    - `Expiration`：选 `90 days`（别选 No expiration）
-   - `Select scopes`：**只勾 `repo` 这一个**（它包含下面所有子项）
+   - `Select scopes`：**勾 `repo` 和 `workflow` 两个**
 6. 拉到最底 → **`Generate token`**
 7. 页面顶部出现一串 `ghp_xxxxxxxx...` —— **只显示这一次，立刻复制到记事本**
+
+### 为什么必须多勾一个 `workflow`
+
+本仓库含 `.github/workflows/ci.yml`（GitHub Actions 配置）。GitHub 把「写入工作流文件」
+当作高危操作单独管控：**只有 `repo` 权限的 Token 无法推送任何包含 workflow 文件的提交**，
+哪怕这个文件本来就在仓库里、你只是改了 README。
+
+漏勾的报错长这样：
+
+```
+! [remote rejected] main -> main (refusing to allow a Personal Access Token
+  to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)
+error: failed to push some refs to 'https://github.com/...'
+```
+
+注意它说的是 `workflow scope`，**不是密码错、也不是仓库不存在**。很多人看到
+"rejected" 会以为是凭据问题，反复重输 Token 也不会好。
+
+**如果 Token 已经生成了**，不用重新建：点开那个 token 的名字 → 勾上 `workflow`
+→ `Update token`。Token 字符串不变，系统缓存的凭据仍然有效，改完直接重跑推送即可。
+
+> 如果你用的是 fine-grained token（`github_pat_` 开头），路径不同：
+> 在 token 的 `Repository permissions` 里把 **`Workflows`** 设为 `Read and write`，
+> 同时 `Contents` 需要 `Read and write`。
 
 > 这串东西等于你的账号权限，别贴到聊天窗口、别提交进仓库。
 > 本项目已经把 `config/llm.json` 之类加进 `.gitignore`，但 Token 你自己要收好。
@@ -246,6 +270,37 @@ Windows 会把错的凭据记住，先清掉：
 控制面板 → 用户账户 → 凭据管理器 → Windows 凭据
 找到 git:https://github.com，删除
 ```
+
+### `refusing to allow a Personal Access Token to create or update workflow ... without workflow scope`
+
+完整报错：
+
+```
+! [remote rejected] main -> main (refusing to allow a Personal Access Token
+  to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)
+error: failed to push some refs to 'https://github.com/...'
+```
+
+**原因**：Token 只勾了 `repo`，缺 `workflow`。本仓库含 `.github/workflows/ci.yml`，
+GitHub 要求写工作流文件必须单独授权。**不是密码错，重输 Token 没用。**
+
+**处理（二选一）**：
+
+A. 给现有 Token 补权限 —— 凭据不用清，最省事
+
+```
+GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+→ 点开这个 token 的名字 → 勾上 workflow → Update token
+```
+
+Token 字符串不变，改完直接重跑 `bash tools/push_to_github.sh 你的用户名`。
+
+B. 重新生成一个勾了 `repo` + `workflow` 的新 Token
+
+字符串变了，必须先清掉系统缓存的旧凭据（见上一节），否则不会弹窗让你输入新的。
+
+> fine-grained token（`github_pat_` 开头）没有 `workflow` 这个 scope，
+> 要去 `Repository permissions` 里把 `Workflows` 设为 `Read and write`。
 
 ### `Permission denied (publickey)`
 
@@ -402,7 +457,7 @@ git config --global user.email "你的GitHub邮箱"
 # 2. 网页建空仓库（三个勾都别勾）
 #    https://github.com/new
 
-# 3. 生成 Token（只勾 repo 权限）
+# 3. 生成 Token（勾 repo + workflow 两个，缺 workflow 会被拒）
 #    https://github.com/settings/tokens
 
 # 4. 推送

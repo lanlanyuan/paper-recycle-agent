@@ -25,6 +25,8 @@ cd "$ROOT" || exit 2
 
 red()  { printf '\033[31m%s\033[0m\n' "$*"; }
 green(){ printf '\033[32m%s\033[0m\n' "$*"; }
+yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
+warn() { printf '\033[33m%s\033[0m\n' "$*"; }
 dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
 step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
@@ -63,6 +65,17 @@ if [[ -n "$leaked" ]]; then
   exit 2
 fi
 green "  无敏感文件入库（config/llm.json、data/*.csv 均未跟踪）"
+
+# 仓库里有 .github/workflows/ 时，PAT 必须带 workflow 权限，否则 push 会被服务端拒绝：
+#   ! [remote rejected] main -> main (refusing to allow a Personal Access Token to
+#     create or update workflow `.github/workflows/ci.yml` without `workflow` scope)
+# 这个错误在 push 阶段才出现，且报错文字容易被误读成"权限不够"，所以提前说明。
+HAS_WORKFLOW=0
+if [[ -n "$(git ls-files '.github/workflows/*' 2>/dev/null)" ]]; then
+  HAS_WORKFLOW=1
+  warn "  本仓库含 GitHub Actions 工作流（.github/workflows/）"
+  dim "    Token 必须同时具备 repo + workflow 两个权限，否则推送会被拒绝"
+fi
 
 commits="$(git rev-list --count HEAD)"
 tags="$(git tag | wc -l | tr -d ' ')"
@@ -113,9 +126,32 @@ fi
 branch_count="$(git for-each-ref --format='%(refname:short)' refs/heads | wc -l | tr -d ' ')"
 step "[3/4] 推送 ${branch_count} 个分支与全部 tag"
 dim "  首次推送会要求输入 GitHub 用户名与 Personal Access Token（不是账号密码）"
-dim "  没有 token 的话：GitHub → Settings → Developer settings → Personal access tokens → Generate new token (classic)，勾 repo 权限"
+if [[ "$HAS_WORKFLOW" == "1" ]]; then
+  dim "  Token 权限必须同时勾 repo 与 workflow（缺 workflow 会被服务端拒绝）"
+else
+  dim "  Token 权限勾 repo 即可"
+fi
+dim "  没有 token：GitHub → Settings → Developer settings → Personal access tokens → Generate new token (classic)"
 
-if ! git push -u origin main; then
+if ! push_log="$(git push -u origin main 2>&1)"; then
+  printf '%s\n' "$push_log" | sed 's/^/    /'
+  echo
+  # 这个错误最容易被误读：报错说「without workflow scope」，
+  # 但用户通常以为自己已经给了 repo 权限就该够，于是反复重试。
+  if printf '%s' "$push_log" | grep -q 'workflow'; then
+    red "  Token 缺少 workflow 权限，无法推送 .github/workflows/ci.yml"
+    dim "  这不是密码错误，是 token 的权限范围不够。修法（二选一）："
+    dim ""
+    dim "  A. 给现有 token 加权限（推荐，凭据不用清）"
+    dim "     GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)"
+    dim "     → 点开这个 token 的名字 → 勾上 workflow → Update token"
+    dim "     注意：token 字符串不变，加完直接重跑本脚本即可"
+    dim ""
+    dim "  B. 重新生成一个 token，同时勾 repo + workflow"
+    dim "     新 token 换了字符串，必须先清掉系统缓存的旧凭据，否则不会再弹窗："
+    dim "     控制面板 → 用户账户 → 凭据管理器 → Windows 凭据 → 删除 git:https://github.com"
+    exit 3
+  fi
   red "  push 失败。常见原因："
   dim "    - 远端仓库不是空的（建仓时勾了 README）→ 先 git pull --rebase origin main 再推"
   dim "    - 认证失败 → 密码位置要填 Personal Access Token，不是登录密码"
