@@ -1,5 +1,26 @@
 # 更新日志（CHANGELOG）
 
+## v1.6.5 (2026-10-23)
+**修徽章替换在 Windows 上必然失败的问题（两个坑叠加）。**
+
+用户推送成功后收尾报「替换脚本异常」，README 的 CI 徽章没换掉。查下去是两个独立问题：
+
+- **坑一：`python` 执行失败**。Windows 上 `python` 可能是微软商店的
+  App Execution Alias 桩，`command -v` 找得到、执行却返回 9009，
+  被 shell 截断成 49，正好落进 `*)` 分支，用户只看到一句「替换脚本异常」。
+- **坑二：换行符不匹配**。README 在工作区是 CRLF，而脚本把待匹配的多行文本
+  硬编码成 `\n`，`old not in t` 永远成立——即使 python 能跑，也只会静默「跳过」。
+
+- **重写替换逻辑**：改用 `awk`，不依赖任何 Python 环境；用 `index()` 做字面匹配
+  而不是正则（避免 `\/` 这类转义在不同 awk 实现里行为不一）；顺带合并连续空行
+- **修正 `gh` 安装提示**：原来写 `npm install -g gh`——npm 上那个 `gh` 是无关的
+  Node 库，不是 GitHub CLI。改为 `winget install --id GitHub.cli` / `brew install gh`
+- **README**：CI 徽章直接指向真实仓库（`lanlanyuan/paper-recycle-agent`），
+  删掉占位说明块，清理两处连续空行
+
+验证：把 `python` 换成必失败的商店桩，在本地裸仓库模拟完整推送流程，
+五项检查全部通过（占位符清零 / 说明块删除 / 徽章地址正确 / 纯 LF 入库 / 无连续空行）。
+
 ## v1.6.4 (2026-10-23)
 **修 Token 权限说明：含 workflow 文件的仓库必须多勾一个 `workflow`。**
 

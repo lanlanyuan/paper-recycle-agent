@@ -1,14 +1,10 @@
 # 废纸回收 Agent 对话助手
 
+![CI](https://github.com/lanlanyuan/paper-recycle-agent/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.7-3776ab)
 ![Tests](https://img.shields.io/badge/tests-169%20passed-brightgreen)
 ![Deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
-
-> CI 徽章需要仓库地址：把下面这行里的 `OWNER/REPO` 换成你的 GitHub 用户名与仓库名后取消注释。
-> 在此之前不放，是为了避免 README 上出现一个 404 的破图。
->
-> `![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)`
 
 一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
 
@@ -40,7 +36,6 @@
 ```bash
 python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 3.8/3.9 专有 API
 ```
-
 
 ## 这个 Agent 解决什么问题
 
@@ -354,7 +349,6 @@ bash tools/publish_to_github.sh --apply  # 真的创建
 
 脚本会按 `docs/ISSUES.md` 里的顺序建 #1–#30 与 7 个里程碑。**必须在仓库还没有
 任何 Issue/PR 时跑**——Issue 编号是仓库级序列，与 PR 共享，一旦有别的对象占号就对不上了。
-
 
 ## 文档
 - [使用说明](docs/USAGE.md)

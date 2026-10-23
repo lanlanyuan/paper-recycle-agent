@@ -176,47 +176,48 @@ green "  ${branch_count} 个分支与 $(git tag | wc -l | tr -d ' ') 个标签�
 
 step "[4/4] 收尾"
 
-# README 的 CI 徽章占位符换成真实地址
+# README 的 CI 徽章占位符换成真实地址。
+#
+# 这里刻意不用 python：Windows 上 `python` 可能是微软商店的 App Execution Alias 桩，
+# `command -v` 找得到、执行却失败（返回 9009，被 shell 截断成 49），
+# 用户只会看到一句「替换脚本异常」，根本不知道发生了什么。
+# awk 在 Git Bash / Linux / macOS 都有，按行处理。
+# 输出统一用 LF——.gitattributes 已规定 `* text=auto eol=lf`，入库本来就是 LF，
+# 工作区残留的 CRLF 由 git 提交时规范化，这里不用管。
+# 原实现踩了两个坑：把多行文本硬编码成 \n（工作区是 CRLF 时永远匹配不上），
+# 以及依赖 python（Windows 上 python 可能是商店桩，执行必失败）。
 if grep -q "OWNER/REPO" README.md 2>/dev/null; then
-  python_bin=""
-  for c in python python3 py; do
-    command -v "$c" >/dev/null 2>&1 && { python_bin="$c"; break; }
-  done
-  if [[ -n "$python_bin" ]]; then
-    # 退出码：0=已替换  1=无需替换  2=出错
-    "$python_bin" - "$OWNER" "$REPO_NAME" <<'PY'
-import pathlib, sys
-owner, repo = sys.argv[1], sys.argv[2]
-p = pathlib.Path("README.md")
-t = p.read_text(encoding="utf-8")
-old = "> CI 徽章需要仓库地址：把下面这行里的 `OWNER/REPO` 换成你的 GitHub 用户名与仓库名后取消注释。\n> 在此之前不放，是为了避免 README 上出现一个 404 的破图。\n>\n> `![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)`"
-new = "![CI](https://github.com/%s/%s/actions/workflows/ci.yml/badge.svg)" % (owner, repo)
-if old not in t:
-    print("  README 占位符格式已变，跳过自动替换（手动改第 5 行附近即可）")
-    sys.exit(1)
-p.write_text(t.replace(old, new), encoding="utf-8")
-print("  已把 README 的 CI 徽章指向真实仓库")
-sys.exit(0)
-PY
-    case $? in
-      0)
-        git add README.md
-        if git commit -q -m "docs(readme): CI 徽章指向真实仓库地址"; then
-          if git push -q origin main; then
-            green "  徽章提交已推送"
-          else
-            red "  徽章提交已创建但推送失败，手动执行：git push origin main"
-          fi
-        else
-          red "  徽章改动已写入 README.md，但提交失败（见上方 git 报错）"
-          dim "  改动仍在工作区，可手动 git add README.md && git commit && git push"
-        fi
-        ;;
-      1) dim "  跳过" ;;
-      *) red "  替换脚本异常，手动改 README 第 5 行附近的徽章地址" ;;
-    esac
+  badge="![CI](https://github.com/${OWNER}/${REPO_NAME}/actions/workflows/ci.yml/badge.svg)"
+  if awk -v badge="$badge" '
+      index($0, "![CI](https://github.com/OWNER/REPO/actions") > 0 { print badge; hit = 1; next }
+      /^> CI 徽章需要仓库地址/ { skip = 1; next }
+      skip && /^>/ { next }
+      skip { skip = 0 }
+      {
+        is_blank = (length($0) <= 1)
+        if (is_blank && prev_blank) next
+        prev_blank = is_blank
+        print
+      }
+      END { exit(hit ? 0 : 1) }
+    ' README.md > README.md.tmp
+  then
+    mv README.md.tmp README.md
+    git add README.md
+    if git commit -q -m "docs(readme): CI 徽章指向真实仓库地址"; then
+      if git push -q origin main; then
+        green "  CI 徽章已指向真实仓库并推送"
+      else
+        red "  徽章提交已创建但推送失败，手动执行：git push origin main"
+      fi
+    else
+      red "  徽章改动已写入 README.md，但提交失败（见上方 git 报错）"
+      dim "  改动仍在工作区，可手动 git add README.md && git commit && git push"
+    fi
   else
-    dim "  未找到 python，跳过徽章自动替换（手动改 README 第 5 行）"
+    rm -f README.md.tmp
+    red "  README 里的占位符格式无法识别，手动改第 5 行附近"
+    dim "  正确写法：${badge}"
   fi
 else
   dim "  README 里没有占位符，跳过"
@@ -226,6 +227,10 @@ step "完成"
 green "Repo 地址：https://github.com/${OWNER}/${REPO_NAME}"
 echo
 dim "接下来可选（让 commit message 里的 closes #26 真的指向东西）："
-dim "  npm install -g gh  或  下载 https://cli.github.com/"
-dim "  gh auth login"
-dim "  bash tools/publish_to_github.sh --apply"
+dim "  先装 GitHub CLI —— 注意它不是 npm 包，npm install -g gh 装的是同名但无关的库"
+dim "    Windows: winget install --id GitHub.cli"
+dim "    macOS:   brew install gh"
+dim "    其他:    https://cli.github.com/"
+dim "  然后："
+dim "    gh auth login"
+dim "    bash tools/publish_to_github.sh --apply"
