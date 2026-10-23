@@ -68,6 +68,15 @@ commits="$(git rev-list --count HEAD)"
 tags="$(git tag | wc -l | tr -d ' ')"
 dim "  提交 $commits 个，标签 $tags 个"
 
+# git 身份没配的话，后面替换徽章那步的 commit 会静默失败
+if ! git config user.email >/dev/null 2>&1 || ! git config user.name >/dev/null 2>&1; then
+  red "  未配置 git 身份（user.name / user.email），提交会失败："
+  dim "    git config --global user.name \"你的名字\""
+  dim "    git config --global user.email \"你的邮箱\""
+  exit 2
+fi
+green "  git 身份已配置"
+
 # ---------------------------------------------------------------- 2. 参数
 
 if [[ -z "$OWNER" ]]; then
@@ -130,6 +139,7 @@ if grep -q "OWNER/REPO" README.md 2>/dev/null; then
     command -v "$c" >/dev/null 2>&1 && { python_bin="$c"; break; }
   done
   if [[ -n "$python_bin" ]]; then
+    # 退出码：0=已替换  1=无需替换  2=出错
     "$python_bin" - "$OWNER" "$REPO_NAME" <<'PY'
 import pathlib, sys
 owner, repo = sys.argv[1], sys.argv[2]
@@ -137,16 +147,30 @@ p = pathlib.Path("README.md")
 t = p.read_text(encoding="utf-8")
 old = "> CI 徽章需要仓库地址：把下面这行里的 `OWNER/REPO` 换成你的 GitHub 用户名与仓库名后取消注释。\n> 在此之前不放，是为了避免 README 上出现一个 404 的破图。\n>\n> `![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)`"
 new = "![CI](https://github.com/%s/%s/actions/workflows/ci.yml/badge.svg)" % (owner, repo)
-if old in t:
-    p.write_text(t.replace(old, new), encoding="utf-8")
-    print("  README 的 CI 徽章已指向真实仓库")
-else:
+if old not in t:
     print("  README 占位符格式已变，跳过自动替换（手动改第 5 行附近即可）")
+    sys.exit(1)
+p.write_text(t.replace(old, new), encoding="utf-8")
+print("  已把 README 的 CI 徽章指向真实仓库")
+sys.exit(0)
 PY
-    git add README.md
-    git commit -q -m "docs(readme): CI 徽章指向真实仓库地址" 2>/dev/null \
-      && git push -q origin main \
-      && green "  徽章提交已推送"
+    case $? in
+      0)
+        git add README.md
+        if git commit -q -m "docs(readme): CI 徽章指向真实仓库地址"; then
+          if git push -q origin main; then
+            green "  徽章提交已推送"
+          else
+            red "  徽章提交已创建但推送失败，手动执行：git push origin main"
+          fi
+        else
+          red "  徽章改动已写入 README.md，但提交失败（见上方 git 报错）"
+          dim "  改动仍在工作区，可手动 git add README.md && git commit && git push"
+        fi
+        ;;
+      1) dim "  跳过" ;;
+      *) red "  替换脚本异常，手动改 README 第 5 行附近的徽章地址" ;;
+    esac
   else
     dim "  未找到 python，跳过徽章自动替换（手动改 README 第 5 行）"
   fi
