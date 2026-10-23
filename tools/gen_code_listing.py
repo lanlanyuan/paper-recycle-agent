@@ -44,10 +44,15 @@ ROOT_FILES = [
     "conftest.py",
     "pyproject.toml",
     "requirements.txt",
+    ".gitattributes",
     "data/enterprises.csv.example",
     "data/io_matrix.csv.example",
     "config/llm.json.example",
     ".github/workflows/ci.yml",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+    ".github/ISSUE_TEMPLATE/feature_request.yml",
+    ".github/ISSUE_TEMPLATE/config.yml",
+    ".github/PULL_REQUEST_TEMPLATE.md",
 ]
 
 

@@ -1,5 +1,34 @@
 # 更新日志（CHANGELOG）
 
+## v1.6.2 (2026-10-23)
+**准备上传 GitHub：修 README 破图、模板结构、一键推送脚本。**
+
+- **README 修复**
+  - CI 徽章原本指向 `your-name/paper-recycle-agent`，真实仓库里是 404 破图。
+    改为注释形式并写明替换方法，补 Tests / Deps 两个不需要仓库地址的徽章
+  - 「六表 Excel」→「七表」，「四个标签页」→「七个标签页」
+  - 项目结构树中文注释宽度不一导致竖线错位，统一对齐
+  - 「③ 在线版」改成「③ 自行部署」——没有线上链接就不该写有
+  - 新增「上传到 GitHub」章节：建空仓库 → 一键脚本 → 认证说明 → 补建 Issue
+- **`.github` 模板结构**
+  - `.github/ISSUE_TEMPLATE.yml` 是单文件写法，GitHub 只认
+    `.github/ISSUE_TEMPLATE/` 目录下的 `bug_report.yml` / `feature_request.yml` / `config.yml`，
+    原来那个文件根本不会被加载。已改成目录结构
+- **新增 `tools/push_to_github.sh`**
+  - 体检（git 仓库 / 工作区干净 / 无敏感文件 / git 身份已配）→ 配远端 → 推 main + tags
+    → 把 README 的 CI 徽章换成真实地址并推一版
+  - 不带参数只打印指引，不碰任何东西
+- **新增 `tools/check_history.py`**：校验时间线单调、分支有 `--no-ff` 合并、
+  标签可达、提交信息规范。CI 每次都会跑
+- **新增 `tools/publish_to_github.sh`**：用 `gh` 把 `docs/ISSUES.md` 的 #1–#30
+  与里程碑真实建到 GitHub，让 commit message 里的 `closes #26` 不再悬空
+- **新增 `.gitattributes`**：全部按 LF 入库，只有 `.bat` 保留 CRLF；
+  构建产物标记为 generated
+- **修复推送脚本的静默失败**：徽章替换后 `git commit` 因「Author identity unknown」
+  失败，但错误被 `2>/dev/null` 吞掉，脚本仍打印成功。现改为体检阶段先查 git 身份，
+  去掉 `2>/dev/null`，Python 侧用退出码区分「已替换 / 无需替换 / 出错」
+- 测试 159 → 169 项（新增 `tests/test_history.py`）
+
 ## v1.6.1 (2026-10-23)
 **修复：省级「消耗金额」被错标为官方数据。**
 

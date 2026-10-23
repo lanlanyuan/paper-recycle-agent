@@ -508,3 +508,87 @@ Excel 导出实测：
 - `test_public_config_never_leaks_key` —— 遍历 `public()` 的所有字段，确认没有明文密钥；
 - `test_chat_http_error_is_readable_and_scrubbed` —— 401 的报错文本里不能出现 key；
 - `test_spend_matches_category_sum` —— 两条算金额的路径（总量 × 均价 / 分类加总）必须一致。
+
+### 2026-10-23 · 准备上传 GitHub（v1.6.2）
+
+用户问「这个文件怎么搞 GitHub Repo 地址」。这个问题暴露了一件之前没做的事：
+仓库一直是纯本地的，`git remote -v` 是空的，而 README 里已经写了 CI 徽章、
+commit message 里已经写了 `closes #26`——**那些地址和编号全是悬空的**。
+
+#### 核查出的四处问题
+
+| 问题 | 具体表现 | 后果 |
+| --- | --- | --- |
+| CI 徽章是破图 | 指向 `your-name/paper-recycle-agent` | GitHub 上显示裂图，第一印象就废了 |
+| 模板不会被加载 | `.github/ISSUE_TEMPLATE.yml` 单文件写法 | GitHub 只认 `ISSUE_TEMPLATE/` 目录，这个文件等于没写 |
+| 没有 `.gitattributes` | Windows 提交时满屏 LF→CRLF 警告 | 克隆到 Linux 后 shell 脚本可能报 `bad interpreter` |
+| 文档数字过时 | 「六表」「四个标签页」「75 个提交」 | 与实际（七表 / 七页 / 80 提交）不符 |
+
+徽章的处理方式值得说一下：**没有直接删掉，也没有保留破图**。改成注释块，
+写明「把 OWNER/REPO 换成你的地址后取消注释」，同时补了 Tests / Deps 两个
+不依赖仓库地址的徽章。这样 README 在任何状态下都不会出现裂图。
+
+#### 写脚本，而不是给一串命令
+
+`tools/push_to_github.sh` 分四步：体检 → 配远端 → 推送 → 替换徽章。
+
+体检里有两条硬拦截：
+
+- **敏感文件**：`config/llm.json`（含 API 密钥）、`data/enterprises.csv`、
+  `data/io_matrix.csv` 一旦被 `git ls-files` 命中就退出。宁可停下也不能推到公开仓库
+- **git 身份**：没配 `user.name` / `user.email` 时后面 commit 会失败
+
+配远端用 `set-url` 而不是 `add`——重复执行不会因为「remote 已存在」中断。
+
+#### 怎么验证一个"推送脚本"是真的能用
+
+没有 GitHub 账号也能测：建一个本地裸仓库当远端，用 `url.insteadOf` 把
+`https://github.com/tester/` 重写到本地路径，脚本完全不知道自己推的是本地：
+
+```bash
+git init --bare $TMP/bare/paper-recycle-agent.git
+git clone --no-hardlinks . $TMP/work
+git config url."file://$TMP/bare/".insteadOf "https://github.com/tester/"
+bash tools/push_to_github.sh tester
+```
+
+**这一步抓到了真 bug**：第一次跑时脚本打印「徽章提交已推送」，但裸仓库里
+`main` 的最新提交还是替换前那个。原因：
+
+```bash
+git commit -q -m "..." 2>/dev/null && git push -q origin main && green "  徽章提交已推送"
+```
+
+`2>/dev/null` 把 `Author identity unknown` 的报错吞了，`&&` 短路后整条语句
+静默失败，而 `green` 只在成功时执行——但前面的 Python 已经打印了「已替换」，
+看起来像成功了。改动留在工作区，没进仓库。
+
+修复分三处：体检阶段先查 git 身份；去掉 `2>/dev/null`；Python 侧改用退出码
+（0=已替换 / 1=无需替换 / 2=出错），bash 只在真的替换后才提交，
+commit 或 push 失败都明确给出补救命令。
+
+重测：83 个提交、6 个标签全部推送成功，徽章替换后提交并推送，裸仓库里
+`grep OWNER/REPO` 返回 0 条。
+
+#### 关于「过程可信」
+
+顺手写了 `tools/check_history.py`，把「连续开发」变成可证伪的检查：
+父子提交时间严格递增、author 与 committer 一致、每个 feature 分支都有 `--no-ff`
+合并、标签指向可达提交、提交信息带规范前缀。CI 每次跑。
+
+`tests/test_history.py` 用临时仓库构造反例（快进合并、时间倒挂、无前缀），
+确保校验器本身不会失效——**校验器自己没人校验，就是装饰品**。
+
+写测试时踩了一个坑：测试助手用 `f%d.txt % len(glob("*.txt"))` 生成文件名，
+两个分支各自创建文件时算出的名字相同，`git merge` 直接冲突，测试莫名其妙失败。
+改成 `uuid` 后正常，同时给 `git commit` 加了 `assert returncode == 0`——
+助手静默失败会让测试得出错误结论。
+
+#### 结果
+
+```
+pytest -q                     169 passed（原 159）
+tools/check_history.py        79 提交 / 16 合并 / 6 标签，五项检查全通过
+模拟推送（本地裸仓库）          main + 6 个 tag 推送成功，徽章替换生效
+git status                    工作区干净
+```

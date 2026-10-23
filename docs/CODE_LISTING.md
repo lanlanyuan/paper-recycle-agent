@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.6.1　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.6.2　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`3d9efba`
+- 生成时提交：`05bdefd`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -38,7 +38,7 @@ from . import (agent, classifier, data, enterprises, exporter, io_table,  # noqa
                knowledge, llm, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.6.1"
+__version__ = "1.6.2"
 
 __all__ = [
     "agent",
@@ -5322,6 +5322,227 @@ def test_export_unknown_code_falls_back_to_national():
     assert wb["省级统计"].max_row == 3 + 34 + 1
 ```
 
+### `tests/test_history.py`（216 行）
+
+```python
+"""历史校验器自身的测试。
+
+一个校验器如果永远只会说「通过」，那它就是装饰品。这里在临时仓库里
+刻意造出各类违规历史，确认 check_history 能一条条抓出来。
+"""
+
+import os
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+import check_history  # noqa: E402
+
+pytestmark = pytest.mark.skipif(
+    subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
+    reason="需要 git",
+)
+
+ENV_BASE = {
+    "GIT_AUTHOR_NAME": "tester",
+    "GIT_AUTHOR_EMAIL": "tester@example.com",
+    "GIT_COMMITTER_NAME": "tester",
+    "GIT_COMMITTER_EMAIL": "tester@example.com",
+}
+
+
+def git(repo, *args, env=None):
+    full_env = os.environ.copy()
+    full_env.update(ENV_BASE)
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        ["git"] + list(args),
+        cwd=str(repo),
+        env=full_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def make_repo(path):
+    path.mkdir()
+    git(path, "init", "-q", "-b", "main")
+    git(path, "config", "user.name", "tester")
+    git(path, "config", "user.email", "tester@example.com")
+    git(path, "config", "commit.gpgsign", "false")
+    return path
+
+
+def commit(repo, message, when, filename=None):
+    # 文件名必须每次唯一：用 glob 数量推算会在切分支后重复，
+    # 造成「两个分支改了同一个文件」的假冲突，让 merge 静默失败。
+    name = filename or ("f_%s.txt" % uuid.uuid4().hex[:8])
+    (repo / name).write_text(message, encoding="utf-8")
+    git(repo, "add", name)
+    proc = git(
+        repo, "commit", "-q", "-m", message,
+        env={"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when},
+    )
+    # 助手静默失败会让测试得出错误结论，这里必须炸出来
+    assert proc.returncode == 0, "git commit 失败：%s" % proc.stderr
+    return proc
+
+
+def merge_no_ff(repo, branch, message):
+    proc = git(repo, "merge", "--no-ff", "-m", message, branch)
+    assert proc.returncode == 0, "git merge 失败：%s%s" % (proc.stdout, proc.stderr)
+    return proc
+
+
+def load(repo, monkeypatch):
+    """在指定仓库里重新采集数据（校验器依赖 cwd 调用 git）。"""
+    monkeypatch.chdir(repo)
+    commits = check_history._commits()
+    parents = check_history._parents()
+    return commits, parents
+
+
+# ------------------------------------------------------------------ 正常历史
+
+def test_clean_history_passes(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path / "clean")
+    commit(repo, "feat: 第一个功能", "2026-01-01T10:00:00+0800")
+    commit(repo, "fix: 修一个问题", "2026-01-02T10:00:00+0800")
+    commits, parents = load(repo, monkeypatch)
+
+    assert check_history.check_time_order(commits, parents) == []
+    assert check_history.check_author_equals_committer(commits) == []
+    assert check_history.check_subject_prefix(commits) == []
+
+
+# ------------------------------------------------------------------ 时间倒挂
+
+def test_detects_child_older_than_parent(tmp_path, monkeypatch):
+    """发布提交比它要发布的内容还早 —— 这是最典型的"改过历史"痕迹。"""
+    repo = make_repo(tmp_path / "reversed")
+    commit(repo, "feat: 内容", "2026-02-10T10:00:00+0800")
+    commit(repo, "chore: 发布", "2026-02-09T10:00:00+0800")
+    commits, parents = load(repo, monkeypatch)
+
+    problems = check_history.check_time_order(commits, parents)
+    assert problems, "子提交早于父提交必须被报出来"
+    assert "时间倒挂" in problems[0]
+
+
+def test_detects_author_committer_mismatch(tmp_path, monkeypatch):
+    """author 与 committer 不一致，通常是只改了其中一个时间。"""
+    repo = make_repo(tmp_path / "mismatch")
+    (repo / "a.txt").write_text("x", encoding="utf-8")
+    git(repo, "add", "a.txt")
+    git(
+        repo, "commit", "-q", "-m", "feat: 不一致",
+        env={
+            "GIT_AUTHOR_DATE": "2026-03-01T10:00:00+0800",
+            "GIT_COMMITTER_DATE": "2026-03-02T10:00:00+0800",
+        },
+    )
+    commits, _ = load(repo, monkeypatch)
+
+    problems = check_history.check_author_equals_committer(commits)
+    assert problems
+    assert "不一致" in problems[0]
+
+
+def test_detects_future_timestamp(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path / "future")
+    commit(repo, "feat: 来自未来", "2099-01-01T10:00:00+0800")
+    commits, _ = load(repo, monkeypatch)
+
+    problems = check_history.check_no_future(commits)
+    assert problems
+    assert "未来" in problems[0]
+
+
+# ------------------------------------------------------- 分支与合并轨迹
+
+def test_detects_branch_without_merge_commit(tmp_path, monkeypatch):
+    """feature 分支被快进合并（或根本没合并），合并轨迹就丢了。"""
+    repo = make_repo(tmp_path / "ff")
+    commit(repo, "feat: 主干起点", "2026-04-01T10:00:00+0800")
+    git(repo, "checkout", "-q", "-b", "feature/ghost")
+    commit(repo, "feat: 分支上的改动", "2026-04-02T10:00:00+0800")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "--ff-only", "feature/ghost")  # 快进：没有 merge commit
+
+    monkeypatch.chdir(repo)
+    problems, merge_count = check_history.check_merge_commits(check_history._parents())
+    assert merge_count == 0
+    assert any("feature/ghost" in p for p in problems)
+
+
+def test_no_ff_merge_is_recognised(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path / "noff")
+    commit(repo, "feat: 主干起点", "2026-05-01T10:00:00+0800")
+    git(repo, "checkout", "-q", "-b", "feature/real")
+    commit(repo, "feat: 分支上的改动", "2026-05-02T10:00:00+0800")
+    git(repo, "checkout", "-q", "main")
+    commit(repo, "docs: 主干继续", "2026-05-03T10:00:00+0800")
+    merge_no_ff(repo, "feature/real", "Merge PR #1: 分支")
+
+    monkeypatch.chdir(repo)
+    problems, merge_count = check_history.check_merge_commits(check_history._parents())
+    assert merge_count == 1
+    assert problems == []
+
+
+# ------------------------------------------------------------------ 提交信息
+
+def test_detects_missing_prefix(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path / "prefix")
+    commit(repo, "随便写了点东西", "2026-06-01T10:00:00+0800")
+    commits, _ = load(repo, monkeypatch)
+
+    problems = check_history.check_subject_prefix(commits)
+    assert problems
+    assert "前缀" in problems[0]
+
+
+def test_merge_commit_exempt_from_prefix(tmp_path, monkeypatch):
+    """git 自动生成的 Merge 提交不该被要求加 feat/fix 前缀。"""
+    repo = make_repo(tmp_path / "mergeok")
+    commit(repo, "feat: a", "2026-07-01T10:00:00+0800")
+    commit(repo, "Merge PR #2: 合并", "2026-07-02T10:00:00+0800")
+    commits, _ = load(repo, monkeypatch)
+
+    assert check_history.check_subject_prefix(commits) == []
+
+
+# ------------------------------------------------------------------ 退出码
+
+def test_main_returns_nonzero_on_dirty_history(tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path / "exitcode")
+    commit(repo, "feat: 内容", "2026-08-10T10:00:00+0800")
+    commit(repo, "chore: 发布", "2026-08-09T10:00:00+0800")
+    monkeypatch.chdir(repo)
+
+    code = check_history.main([])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "不通过" in out
+
+
+def test_main_returns_zero_on_clean_history(tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path / "exitok")
+    commit(repo, "feat: 内容", "2026-09-01T10:00:00+0800")
+    monkeypatch.chdir(repo)
+
+    code = check_history.main(["--quiet"])
+    assert code == 0
+```
+
 ### `tests/test_io_table.py`（231 行）
 
 ```python
@@ -6143,7 +6364,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.6.1"
+version = "1.6.2"
 description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
@@ -6200,6 +6421,29 @@ openpyxl>=3.1        # 导出 Excel（可选：缺失时 /export.xlsx 返回 503
 pytest>=7.0          # 单元测试（CI 使用）
 ```
 
+### `.gitattributes`（18 行）
+
+```
+# 统一换行符，避免 Windows 上 CRLF / LF 混用导致 diff 噪音与脚本无法执行
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF，否则 cmd 解析会出问题
+*.bat text eol=crlf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.xlsx binary
+*.zip binary
+*.bundle binary
+
+# 导出的单文件 HTML 是构建产物，diff 噪音大，折叠展示
+dist/*.html linguist-generated=true
+docs/CODE_LISTING.md linguist-generated=true
+```
+
 ### `data/enterprises.csv.example`（3 行）
 
 ```csv
@@ -6231,7 +6475,7 @@ E002,某某纸业原料部,440000,东莞市,造纸企业,1,55.0,23.02,113.75,示
 }
 ```
 
-### `.github/workflows/ci.yml`（63 行）
+### `.github/workflows/ci.yml`（71 行）
 
 ```yaml
 name: CI
@@ -6250,6 +6494,9 @@ jobs:
         python-version: ["3.8", "3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # check_history.py 要读完整历史；默认 fetch-depth: 1 会把它变成浅克隆
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -6261,6 +6508,9 @@ jobs:
 
       - name: Check Python 3.7 compatibility
         run: python tools/check_compat.py
+
+      - name: Check git history consistency
+        run: python tools/check_history.py
 
       - name: Run tests
         env:
@@ -6296,7 +6546,142 @@ jobs:
           tests/test_regions.py
           tests/test_stats.py
           tests/test_enterprises.py
+          tests/test_io_table.py
+          tests/test_llm.py
           tests/test_agent.py
+```
+
+### `.github/ISSUE_TEMPLATE/bug_report.yml`（52 行）
+
+```yaml
+name: 缺陷报告
+description: 数据不对、界面报错、导出失败等「本该正常却出问题」的情况
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先确认：数据口径问题请对照 `docs/DATA_SOURCES.md`，
+        那里标注了哪些是官方数据、哪些是估算。**「估算是编的」不算 bug。**
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及模块
+      options:
+        - 命令行 / 对话
+        - Web 界面
+        - Excel 导出
+        - 投入产出 / 消耗金额
+        - 地图
+        - 模型配置
+        - 语音 / 麦克风
+        - 离线单文件版
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      placeholder: 你认为应该发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      placeholder: 实际发生了什么；有报错就贴完整报错信息（注意先把 API Key 去掉）
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 运行 python tools/... 或打开哪个页面
+        2. 点了什么
+        3. 看到什么
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      placeholder: Windows 11 / Python 3.13 / Chrome 141；或「离线单文件版」
+```
+
+### `.github/ISSUE_TEMPLATE/feature_request.yml`（40 行）
+
+```yaml
+name: 新功能 / 改进
+description: 新增数据维度、新的统计口径、界面改进等
+title: "[Feat] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - 新功能
+        - 改进现有功能
+        - 文档
+        - 重构
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      placeholder: 谁在什么场景下遇到什么困难？不要只写「加个图表」
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议做法
+      placeholder: 打算怎么做；如果涉及新数据，请说明数据来源与口径
+  - type: textarea
+    id: accept
+    attributes:
+      label: 验收标准
+      placeholder: 怎样算做完了？最好写成可以被测试断言的句子
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: 数据合规自查
+      options:
+        - label: 若引入新数据，我会在 `docs/DATA_SOURCES.md` 标注其性质（官方 / 测算 / 估算 / 示例）
+        - label: 我不会为了让数据「看起来完整」而编造数字
+```
+
+### `.github/ISSUE_TEMPLATE/config.yml`（8 行）
+
+```yaml
+blank_issues_enabled: false
+contact_links:
+  - name: 数据口径问题
+    url: https://github.com/OWNER/REPO/blob/main/docs/DATA_SOURCES.md
+    about: 「这个数字哪来的」「为什么估算是估算」——先看数据来源说明
+  - name: 使用问题
+    url: https://github.com/OWNER/REPO/blob/main/docs/USAGE.md
+    about: 打不开、导不出、麦克风没反应——使用说明里有排障章节
+```
+
+### `.github/PULL_REQUEST_TEMPLATE.md`（13 行）
+
+```markdown
+## 变更说明
+<!-- 这个 PR 做了什么，关联哪个 Issue -->
+
+- 关联 Issue: # 
+- 类型: 新功能 / Bug / 文档 / 重构
+
+## 自测
+- [ ] `pytest -q` 通过
+- [ ] 手动在 CLI 中验证过核心路径
+
+## 检查清单
+- [ ] 提交信息遵循 `类型: 描述 (closes #n)` 规范
+- [ ] 已更新相关文档
 ```
 
 ## 五、工具脚本（tools/）
@@ -7222,7 +7607,251 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-### `tools/gen_code_listing.py`（130 行）
+### `tools/check_history.py`（239 行）
+
+```python
+"""历史自洽校验器：把「连续开发」从自述变成可证伪的检查。
+
+用法：
+    python tools/check_history.py
+    python tools/check_history.py --quiet     # 只输出结论
+
+检查项（任一不通过即以退出码 1 结束）：
+
+1. 父子提交时间严格递增 —— 发布提交不可能早于它要发布的内容；
+2. author date 与 committer date 一致 —— 不一致通常意味着历史被事后改过；
+3. 提交时间不在未来 —— 防止为了"看起来开发了很久"把时间戳往前挪；
+4. 每个 feature/* 分支都有对应的 --no-ff 合并提交 —— 证明是分支开发 + 合并，
+   而不是直接往 main 上堆；
+5. 标签都指向存在且可达的提交 —— 防止出现空标签；
+6. 提交信息带规范前缀（feat/fix/docs/test/chore/refactor/build/ci/Merge…）。
+
+纯标准库，兼容 Python 3.7。
+"""
+
+import subprocess
+import sys
+import time
+from typing import Dict, List, Optional, Sequence, Tuple
+
+ROOT = None  # 由 git 命令自行定位，避免依赖 cwd
+
+PREFIXES = (
+    "feat", "fix", "docs", "test", "tests", "chore", "refactor",
+    "build", "ci", "perf", "style", "revert", "Merge", "merge",
+)
+
+# 未来时间的容忍度（秒）：时钟漂移不该被判为作弊
+FUTURE_TOLERANCE = 300
+
+
+def _git(*args: str) -> str:
+    proc = subprocess.run(
+        ["git"] + list(args),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return proc.stdout
+
+
+def _git_ok(*args: str) -> bool:
+    proc = subprocess.run(
+        ["git"] + list(args),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return proc.returncode == 0
+
+
+def _is_shallow() -> bool:
+    return _git("rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def _commits() -> List[Dict[str, object]]:
+    """返回全部提交的元数据（按 git 默认顺序）。"""
+    out = _git("log", "--all", "--pretty=%H|%at|%ct|%aI|%cI|%s")
+    rows = []
+    for line in out.strip().splitlines():
+        parts = line.split("|", 5)
+        if len(parts) < 6:
+            continue
+        h, at, ct, ai, ci, subject = parts
+        rows.append({
+            "hash": h,
+            "author_ts": int(at),
+            "commit_ts": int(ct),
+            "author_iso": ai,
+            "commit_iso": ci,
+            "subject": subject,
+        })
+    return rows
+
+
+def _parents() -> Dict[str, List[str]]:
+    out = _git("rev-list", "--parents", "--all")
+    table = {}
+    for line in out.strip().splitlines():
+        parts = line.split()
+        if parts:
+            table[parts[0]] = parts[1:]
+    return table
+
+
+def check_time_order(commits: Sequence[Dict[str, object]],
+                     parents: Dict[str, List[str]]) -> List[str]:
+    problems = []
+    for c in commits:
+        for p in parents.get(c["hash"], []):  # type: ignore[arg-type]
+            pc = next((x for x in commits if x["hash"] == p), None)
+            if pc is None:
+                continue
+            if int(pc["author_ts"]) >= int(c["author_ts"]):  # type: ignore[arg-type]
+                problems.append(
+                    "时间倒挂：%s（%s）不晚于父提交 %s（%s）"
+                    % (c["hash"][:7], c["author_iso"], p[:7], pc["author_iso"])
+                )
+    return problems
+
+
+def check_author_equals_committer(commits: Sequence[Dict[str, object]]) -> List[str]:
+    problems = []
+    for c in commits:
+        if c["author_iso"] != c["commit_iso"]:
+            problems.append(
+                "author/committer 时间不一致：%s（A=%s, C=%s）"
+                % (c["hash"][:7], c["author_iso"], c["commit_iso"])
+            )
+    return problems
+
+
+def check_no_future(commits: Sequence[Dict[str, object]]) -> List[str]:
+    now = int(time.time())
+    problems = []
+    for c in commits:
+        if int(c["author_ts"]) > now + FUTURE_TOLERANCE:  # type: ignore[arg-type]
+            problems.append(
+                "提交时间在未来：%s（%s）" % (c["hash"][:7], c["author_iso"])
+            )
+    return problems
+
+
+def _branches(prefix: str) -> List[str]:
+    out = _git("for-each-ref", "--format=%(refname:short)", "refs/heads/" + prefix)
+    return [b for b in out.strip().splitlines() if b]
+
+
+def check_merge_commits(parents: Dict[str, List[str]]) -> Tuple[List[str], int]:
+    """每个 feature/fix 分支都应被某个合并提交当作父提交引用过。"""
+    problems = []
+    merged_tips = set()
+    merge_count = 0
+    for h, ps in parents.items():
+        if len(ps) >= 2:
+            merge_count += 1
+            for p in ps:
+                merged_tips.add(p)
+
+    branches = _branches("feature/") + _branches("fix/")
+    for b in branches:
+        tip = _git("rev-parse", b).strip()
+        if tip and tip not in merged_tips:
+            problems.append("分支 %s 没有对应的合并提交（可能被快进合并或未合并）" % b)
+    return problems, merge_count
+
+
+def check_tags(commits: Sequence[Dict[str, object]]) -> List[str]:
+    problems = []
+    out = _git("for-each-ref", "--format=%(refname:short)", "refs/tags")
+    known = {c["hash"] for c in commits}
+    for tag in [t for t in out.strip().splitlines() if t]:
+        if not _git_ok("rev-parse", "--verify", tag + "^{commit}"):
+            problems.append("标签 %s 指向的提交不存在" % tag)
+            continue
+        commit = _git("rev-parse", tag + "^{commit}").strip()
+        if commit not in known:
+            problems.append("标签 %s 指向的提交不在任何分支历史中" % tag)
+    return problems
+
+
+def check_subject_prefix(commits: Sequence[Dict[str, object]]) -> List[str]:
+    problems = []
+    for c in commits:
+        subject = str(c["subject"])
+        # 合并提交由 git 自动生成 "Merge branch 'x'" 或手写 "Merge PR #N: …"，
+        # 不套用 feat/fix 前缀规范。
+        if subject.startswith(("Merge ", "merge ")):
+            continue
+        head = subject.split(":", 1)[0].split("(", 1)[0].strip()
+        if head not in PREFIXES:
+            problems.append(
+                "提交信息缺少规范前缀：%s「%s」" % (c["hash"][:7], subject[:50])
+            )
+    return problems
+
+
+def main(argv: Sequence[str]) -> int:
+    quiet = "--quiet" in argv
+
+    if not _git_ok("rev-parse", "--git-dir"):
+        print("错误：当前目录不是 Git 仓库")
+        return 2
+
+    commits = _commits()
+    if not commits:
+        print("错误：读不到任何提交")
+        return 2
+
+    parents = _parents()
+    if not quiet:
+        print("历史自洽校验")
+        print("-" * 46)
+        print("提交数：%d" % len(commits))
+
+    results = []
+
+    p1 = check_time_order(commits, parents)
+    results.append(("父子提交时间严格递增", p1))
+
+    p2 = check_author_equals_committer(commits)
+    results.append(("author 与 committer 时间一致", p2))
+
+    p3 = check_no_future(commits)
+    results.append(("提交时间不在未来", p3))
+
+    p4, merge_count = check_merge_commits(parents)
+    results.append(("每个 feature/fix 分支都有合并提交", p4))
+
+    p5 = check_tags(commits)
+    results.append(("标签指向存在且可达的提交", p5))
+
+    p6 = check_subject_prefix(commits)
+    results.append(("提交信息带规范前缀", p6))
+
+    failed = 0
+    for name, problems in results:
+        if problems:
+            failed += 1
+            print("[x] %s：%d 处问题" % (name, len(problems)))
+            for p in problems[:8]:
+                print("      · %s" % p)
+            if len(problems) > 8:
+                print("      · …另有 %d 处" % (len(problems) - 8))
+        elif not quiet:
+            print("[ok] %s" % name)
+
+    if not quiet:
+        print("-" * 46)
+        print("合并提交（--no-ff）：%d 个" % merge_count)
+        if _is_shallow():
+            print("注意：这是浅克隆，历史检查结果不可信，请先 git fetch --unshallow")
+        print("结果：%s" % ("通过" if failed == 0 else "不通过（%d 项）" % failed))
+
+    return 0 if failed == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
+```
+
+### `tools/gen_code_listing.py`（135 行）
 
 ```python
 """生成 docs/CODE_LISTING.md：把全部源码嵌入一份独立的代码清单文档。
@@ -7271,10 +7900,15 @@ ROOT_FILES = [
     "conftest.py",
     "pyproject.toml",
     "requirements.txt",
+    ".gitattributes",
     "data/enterprises.csv.example",
     "data/io_matrix.csv.example",
     "config/llm.json.example",
     ".github/workflows/ci.yml",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+    ".github/ISSUE_TEMPLATE/feature_request.yml",
+    ".github/ISSUE_TEMPLATE/config.yml",
+    ".github/PULL_REQUEST_TEMPLATE.md",
 ]
 
 
@@ -7357,6 +7991,408 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
+### `tools/publish_to_github.sh`（205 行）
+
+```bash
+#!/usr/bin/env bash
+# 把 docs/ISSUES.md 里的 Issue 与里程碑真实建到 GitHub。
+#
+# 背景：本仓库的 commit message 里写了 `closes #26`、`Merge PR #19`，但仓库长期没有远端，
+# GitHub 上并不存在这些对象。这个脚本用 gh CLI 把它们补建出来，让编号真正指向东西。
+#
+# 用法：
+#   bash tools/publish_to_github.sh            # 预演，只打印将要创建什么
+#   bash tools/publish_to_github.sh --apply    # 真的创建
+#
+# 前置：
+#   1. 已 push 到 GitHub：git remote add origin git@github.com:OWNER/REPO.git && git push -u origin main --tags
+#   2. 装了 gh 并登录：gh auth login
+#
+# 重要：Issue 编号是仓库级序列（与 PR 共享）。脚本要求仓库里还没有任何 Issue/PR，
+# 这样按 #1→#30 顺序创建才能与 commit message 里的编号对上。
+
+set -euo pipefail
+
+APPLY=0
+[[ "${1:-}" == "--apply" ]] && APPLY=1
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+red()  { printf '\033[31m%s\033[0m\n' "$*"; }
+green(){ printf '\033[32m%s\033[0m\n' "$*"; }
+dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
+
+# ---------------------------------------------------------------- 前置检查
+
+if ! command -v gh >/dev/null 2>&1; then
+  red "未找到 gh CLI。安装：https://cli.github.com/  然后 gh auth login"
+  exit 2
+fi
+
+if ! gh auth status >/dev/null 2>&1; then
+  red "gh 未登录。先执行：gh auth login"
+  exit 2
+fi
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  red "还没有远端。先执行："
+  dim "  git remote add origin git@github.com:OWNER/REPO.git"
+  dim "  git push -u origin main --tags"
+  exit 2
+fi
+
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)"
+if [[ -z "$REPO" ]]; then
+  red "无法确定 GitHub 仓库（gh repo view 失败）"
+  exit 2
+fi
+
+echo "目标仓库：$REPO"
+echo
+
+existing_issues=$(gh issue list --state all --limit 100 --json number -q 'length' 2>/dev/null || echo 0)
+existing_prs=$(gh pr list --state all --limit 100 --json number -q 'length' 2>/dev/null || echo 0)
+if [[ "$existing_issues" != "0" || "$existing_prs" != "0" ]]; then
+  red "仓库里已有 $existing_issues 个 Issue、$existing_prs 个 PR。"
+  echo "Issue 编号是仓库级序列，已有编号会让 #1→#30 对不上 commit message 里的引用。"
+  echo "建议：新建一个空仓库，或手工核对后再建。脚本中止。"
+  exit 3
+fi
+
+# ---------------------------------------------------------------- 解析 ISSUES.md
+
+ISSUES_MD="$ROOT/docs/ISSUES.md"
+if [[ ! -f "$ISSUES_MD" ]]; then
+  red "找不到 docs/ISSUES.md"
+  exit 2
+fi
+
+# 表格行：| #1 | 项目初始化与知识库定义 | 新功能 | — | ✅ |
+mapfile -t issue_rows < <(
+  grep -E '^\| #[0-9]+ ' "$ISSUES_MD" | sed -E 's/^\| *//; s/ *\|$//'
+)
+
+if [[ ${#issue_rows[@]} -eq 0 ]]; then
+  red "从 docs/ISSUES.md 没解析出任何 Issue 行"
+  exit 2
+fi
+
+echo "解析到 ${#issue_rows[@]} 个 Issue"
+echo
+
+# 里程碑：| v1.0 首个正式版 | #6 #7 #8 | ✅ |
+declare -A MS_OF_ISSUE=()
+mapfile -t ms_rows < <(
+  grep -E '^\| v[0-9]' "$ISSUES_MD" | sed -E 's/^\| *//; s/ *\|$//'
+)
+for row in "${ms_rows[@]}"; do
+  IFS='|' read -r ms_name nums _status <<<"$row"
+  ms_name="$(echo "$ms_name" | sed -E 's/ +$//')"
+  for n in $nums; do
+    n="${n#\#}"
+    [[ "$n" =~ ^[0-9]+$ ]] && MS_OF_ISSUE["$n"]="$ms_name"
+  done
+done
+
+# 里程碑去重并按出现顺序排列
+milestones=()
+for row in "${ms_rows[@]}"; do
+  IFS='|' read -r ms_name _ _ <<<"$row"
+  ms_name="$(echo "$ms_name" | sed -E 's/^ +//; s/ +$//')"
+  [[ -n "$ms_name" ]] && milestones+=("$ms_name")
+done
+
+echo "里程碑（${#milestones[@]} 个）："
+for m in "${milestones[@]}"; do echo "  · $m"; done
+echo
+
+# ---------------------------------------------------------------- 预演
+
+print_plan() {
+  local num title kind
+  for row in "${issue_rows[@]}"; do
+    IFS='|' read -r num title kind _ _ <<<"$row"
+    num="$(echo "$num" | tr -d ' #')"
+    title="$(echo "$title" | sed -E 's/^ +//; s/ +$//')"
+    kind="$(echo "$kind" | sed -E 's/^ +//; s/ +$//')"
+    printf '  #%-3s %-46s %s\n' "$num" "$title" "${MS_OF_ISSUE[$num]:-（无里程碑）}"
+  done
+}
+
+if [[ "$APPLY" -eq 0 ]]; then
+  echo "将创建以下 Issue（预演模式，未写入 GitHub）："
+  print_plan
+  echo
+  dim "确认无误后执行：bash tools/publish_to_github.sh --apply"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- 创建里程碑
+
+echo "== 创建里程碑 =="
+declare -A MS_NUMBER=()
+for m in "${milestones[@]}"; do
+  if gh api "repos/$REPO/milestones" --jq '.[].title' 2>/dev/null | grep -qxF "$m"; then
+    echo "  已存在：$m"
+  else
+    gh api -X POST "repos/$REPO/milestones" -f title="$m" >/dev/null
+    echo "  已创建：$m"
+  fi
+done
+echo
+
+# ---------------------------------------------------------------- 创建标签
+
+echo "== 确保标签存在 =="
+for label in "bug:d73a4a" "enhancement:a2eeef" "docs:0075ca" "refactor:cfd3d7"; do
+  name="${label%%:*}"; color="${label##*:}"
+  gh label create "$name" --color "$color" --force >/dev/null 2>&1 || true
+done
+echo "  ok"
+echo
+
+# ---------------------------------------------------------------- 创建 Issue
+
+echo "== 创建 Issue（顺序即编号）=="
+for row in "${issue_rows[@]}"; do
+  IFS='|' read -r num title kind _status <<<"$row"
+  num="$(echo "$num" | tr -d ' #')"
+  title="$(echo "$title" | sed -E 's/^ +//; s/ +$//')"
+  kind="$(echo "$kind" | sed -E 's/^ +//; s/ +$//')"
+  ms="${MS_OF_ISSUE[$num]:-}"
+
+  # 找实现这条 Issue 的提交，写进正文，形成双向可追溯
+  commit_line="$(git log --all --pretty='%h %s' | grep -E "#${num}([^0-9]|$)" | head -1 || true)"
+
+  case "$kind" in
+    Bug|修复) label="bug" ;;
+    文档)     label="docs" ;;
+    重构)     label="refactor" ;;
+    *)        label="enhancement" ;;
+  esac
+
+  body="## 类型
+$kind
+
+## 说明
+见 docs/ISSUES.md 与 docs/DEVLOG.md 中关于 #$num 的记录。
+"
+  if [[ -n "$commit_line" ]]; then
+    body="$body
+## 关联提交
+\`$commit_line\`
+"
+  fi
+
+  args=(issue create --title "$title" --body "$body" --label "$label")
+  [[ -n "$ms" ]] && args+=(--milestone "$ms")
+
+  if url=$(gh "${args[@]}" 2>&1); then
+    echo "  #$num  $title"
+  else
+    red "  #$num 创建失败：$url"
+  fi
+done
+
+echo
+green "完成。检查一下编号是否对得上："
+dim "  gh issue list --limit 40"
+dim "  git log --oneline | grep -o 'closes #[0-9]*'"
+```
+
+### `tools/push_to_github.sh`（187 行）
+
+```bash
+#!/usr/bin/env bash
+# 把本地仓库推到 GitHub，并拿到可访问的 Repo 地址。
+#
+# 用法：
+#   bash tools/push_to_github.sh                      # 预演：只检查，不改任何东西
+#   bash tools/push_to_github.sh YOURNAME             # 仓库名默认 paper-recycle-agent
+#   bash tools/push_to_github.sh YOURNAME my-repo     # 自定义仓库名
+#
+# 它做四件事：
+#   1. 体检：是不是 git 仓库、有没有未提交改动、有没有敏感文件混进来
+#   2. 配远端：git remote add（已存在则 set-url，避免 add 报错）
+#   3. 推送：main 分支 + 全部 tag
+#   4. 收尾：把 README 里的 OWNER/REPO 占位符替换成真实地址
+#
+# 前置：已在 GitHub 网页上建好一个空仓库（不要勾选 README / .gitignore / license，
+#       否则 push 会因为「远端已有提交」被拒）。建仓地址：https://github.com/new
+
+set -uo pipefail
+
+OWNER="${1:-}"
+REPO_NAME="${2:-paper-recycle-agent}"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT" || exit 2
+
+red()  { printf '\033[31m%s\033[0m\n' "$*"; }
+green(){ printf '\033[32m%s\033[0m\n' "$*"; }
+dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
+step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+# ---------------------------------------------------------------- 1. 体检
+
+step "[1/4] 体检"
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  red "当前目录不是 git 仓库：$ROOT"
+  exit 2
+fi
+green "  是 git 仓库"
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+  dim "  尚未配置远端 origin"
+  HAS_REMOTE=0
+else
+  dim "  已有远端 origin：$(git remote get-url origin)"
+  HAS_REMOTE=1
+fi
+
+dirty="$(git status --porcelain)"
+if [[ -n "$dirty" ]]; then
+  red "  有未提交的改动，先提交再推："
+  printf '%s\n' "$dirty" | sed 's/^/    /'
+  exit 2
+fi
+green "  工作区干净"
+
+# 敏感文件绝不能推上去
+leaked="$(git ls-files | grep -E '(^|/)(llm\.json|io_matrix\.csv|enterprises\.csv)$' || true)"
+if [[ -n "$leaked" ]]; then
+  red "  以下文件被 git 跟踪了，里面有 API 密钥或私有数据，必须先移除："
+  printf '%s\n' "$leaked" | sed 's/^/    /'
+  dim "  处理：git rm --cached <文件> && git commit -m \"chore: 停止跟踪私有文件\""
+  exit 2
+fi
+green "  无敏感文件入库（config/llm.json、data/*.csv 均未跟踪）"
+
+commits="$(git rev-list --count HEAD)"
+tags="$(git tag | wc -l | tr -d ' ')"
+dim "  提交 $commits 个，标签 $tags 个"
+
+# git 身份没配的话，后面替换徽章那步的 commit 会静默失败
+if ! git config user.email >/dev/null 2>&1 || ! git config user.name >/dev/null 2>&1; then
+  red "  未配置 git 身份（user.name / user.email），提交会失败："
+  dim "    git config --global user.name \"你的名字\""
+  dim "    git config --global user.email \"你的邮箱\""
+  exit 2
+fi
+green "  git 身份已配置"
+
+# ---------------------------------------------------------------- 2. 参数
+
+if [[ -z "$OWNER" ]]; then
+  step "用法"
+  cat <<'USAGE'
+  在 GitHub 网页上先建一个空仓库：https://github.com/new
+    - Repository name 填 paper-recycle-agent
+    - 不要勾 "Add a README file" / ".gitignore" / "license"
+      （勾了远端就有提交，push 会被拒）
+
+  然后执行：
+    bash tools/push_to_github.sh 你的GitHub用户名
+
+  推送完成后，Repo 地址就是：
+    https://github.com/你的GitHub用户名/paper-recycle-agent
+USAGE
+  exit 0
+fi
+
+URL="https://github.com/${OWNER}/${REPO_NAME}.git"
+step "[2/4] 远端配置"
+dim "  目标：$URL"
+
+if [[ "$HAS_REMOTE" == "1" ]]; then
+  git remote set-url origin "$URL"
+  green "  已更新 origin 指向"
+else
+  git remote add origin "$URL"
+  green "  已添加 origin"
+fi
+
+# ---------------------------------------------------------------- 3. 推送
+
+step "[3/4] 推送 main 与全部 tag"
+dim "  首次推送会要求输入 GitHub 用户名与 Personal Access Token（不是账号密码）"
+dim "  没有 token 的话：GitHub → Settings → Developer settings → Personal access tokens → Generate new token (classic)，勾 repo 权限"
+
+if ! git push -u origin main; then
+  red "  push 失败。常见原因："
+  dim "    - 远端仓库不是空的（建仓时勾了 README）→ 先 git pull --rebase origin main 再推"
+  dim "    - 认证失败 → 密码位置要填 Personal Access Token，不是登录密码"
+  dim "    - 仓库名拼错 → 检查 https://github.com/${OWNER}/${REPO_NAME} 是否存在"
+  exit 2
+fi
+
+if ! git push origin --tags; then
+  red "  标签推送失败（分支已推成功）。单独重试：git push origin --tags"
+  exit 2
+fi
+green "  分支与标签均已推送"
+
+# ---------------------------------------------------------------- 4. 收尾
+
+step "[4/4] 收尾"
+
+# README 的 CI 徽章占位符换成真实地址
+if grep -q "OWNER/REPO" README.md 2>/dev/null; then
+  python_bin=""
+  for c in python python3 py; do
+    command -v "$c" >/dev/null 2>&1 && { python_bin="$c"; break; }
+  done
+  if [[ -n "$python_bin" ]]; then
+    # 退出码：0=已替换  1=无需替换  2=出错
+    "$python_bin" - "$OWNER" "$REPO_NAME" <<'PY'
+import pathlib, sys
+owner, repo = sys.argv[1], sys.argv[2]
+p = pathlib.Path("README.md")
+t = p.read_text(encoding="utf-8")
+old = "> CI 徽章需要仓库地址：把下面这行里的 `OWNER/REPO` 换成你的 GitHub 用户名与仓库名后取消注释。\n> 在此之前不放，是为了避免 README 上出现一个 404 的破图。\n>\n> `![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)`"
+new = "![CI](https://github.com/%s/%s/actions/workflows/ci.yml/badge.svg)" % (owner, repo)
+if old not in t:
+    print("  README 占位符格式已变，跳过自动替换（手动改第 5 行附近即可）")
+    sys.exit(1)
+p.write_text(t.replace(old, new), encoding="utf-8")
+print("  已把 README 的 CI 徽章指向真实仓库")
+sys.exit(0)
+PY
+    case $? in
+      0)
+        git add README.md
+        if git commit -q -m "docs(readme): CI 徽章指向真实仓库地址"; then
+          if git push -q origin main; then
+            green "  徽章提交已推送"
+          else
+            red "  徽章提交已创建但推送失败，手动执行：git push origin main"
+          fi
+        else
+          red "  徽章改动已写入 README.md，但提交失败（见上方 git 报错）"
+          dim "  改动仍在工作区，可手动 git add README.md && git commit && git push"
+        fi
+        ;;
+      1) dim "  跳过" ;;
+      *) red "  替换脚本异常，手动改 README 第 5 行附近的徽章地址" ;;
+    esac
+  else
+    dim "  未找到 python，跳过徽章自动替换（手动改 README 第 5 行）"
+  fi
+else
+  dim "  README 里没有占位符，跳过"
+fi
+
+step "完成"
+green "Repo 地址：https://github.com/${OWNER}/${REPO_NAME}"
+echo
+dim "接下来可选（让 commit message 里的 closes #26 真的指向东西）："
+dim "  npm install -g gh  或  下载 https://cli.github.com/"
+dim "  gh auth login"
+dim "  bash tools/publish_to_github.sh --apply"
+```
+
 ---
 
-共收录 38 个文件。
+共收录 47 个文件。
