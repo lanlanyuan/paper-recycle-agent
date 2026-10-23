@@ -1,0 +1,52 @@
+name: 缺陷报告
+description: 数据不对、界面报错、导出失败等「本该正常却出问题」的情况
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先确认：数据口径问题请对照 `docs/DATA_SOURCES.md`，
+        那里标注了哪些是官方数据、哪些是估算。**「估算是编的」不算 bug。**
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及模块
+      options:
+        - 命令行 / 对话
+        - Web 界面
+        - Excel 导出
+        - 投入产出 / 消耗金额
+        - 地图
+        - 模型配置
+        - 语音 / 麦克风
+        - 离线单文件版
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      placeholder: 你认为应该发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      placeholder: 实际发生了什么；有报错就贴完整报错信息（注意先把 API Key 去掉）
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 运行 python tools/... 或打开哪个页面
+        2. 点了什么
+        3. 看到什么
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      placeholder: Windows 11 / Python 3.13 / Chrome 141；或「离线单文件版」

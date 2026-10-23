@@ -1,0 +1,40 @@
+name: 新功能 / 改进
+description: 新增数据维度、新的统计口径、界面改进等
+title: "[Feat] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - 新功能
+        - 改进现有功能
+        - 文档
+        - 重构
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      placeholder: 谁在什么场景下遇到什么困难？不要只写「加个图表」
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议做法
+      placeholder: 打算怎么做；如果涉及新数据，请说明数据来源与口径
+  - type: textarea
+    id: accept
+    attributes:
+      label: 验收标准
+      placeholder: 怎样算做完了？最好写成可以被测试断言的句子
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: 数据合规自查
+      options:
+        - label: 若引入新数据，我会在 `docs/DATA_SOURCES.md` 标注其性质（官方 / 测算 / 估算 / 示例）
+        - label: 我不会为了让数据「看起来完整」而编造数字

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 数据口径问题
+    url: https://github.com/OWNER/REPO/blob/main/docs/DATA_SOURCES.md
+    about: 「这个数字哪来的」「为什么估算是估算」——先看数据来源说明
+  - name: 使用问题
+    url: https://github.com/OWNER/REPO/blob/main/docs/USAGE.md
+    about: 打不开、导不出、麦克风没反应——使用说明里有排障章节

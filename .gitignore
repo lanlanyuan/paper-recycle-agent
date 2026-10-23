@@ -19,6 +19,7 @@ env/
 # Test / tooling caches
 .pytest_cache/
 .coverage
+_pytest_tmp/
 
 # 模型 API 配置：含明文密钥，绝不入库
 config/llm.json
