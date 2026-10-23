@@ -1,8 +1,14 @@
 # 废纸回收 Agent 对话助手
 
-![CI](https://github.com/your-name/paper-recycle-agent/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.7-3776ab)
+![Tests](https://img.shields.io/badge/tests-169%20passed-brightgreen)
+![Deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+
+> CI 徽章需要仓库地址：把下面这行里的 `OWNER/REPO` 换成你的 GitHub 用户名与仓库名后取消注释。
+> 在此之前不放，是为了避免 README 上出现一个 404 的破图。
+>
+> `![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)`
 
 一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
 
@@ -12,7 +18,7 @@
 | --- | --- | --- | --- |
 | **① 离线单文件**（最稳） | 双击 `dist/paper-recycle-offline.html` | 只要浏览器 | 对话、五个标签页（含投入产出）、CSV 导出 |
 | **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能：七张表 xlsx、消耗地图、模型配置、麦克风自检 |
-| **③ 在线版** | 打开分享链接 | 能访问外网 | 同 ② |
+| **③ 自行部署**（可选） | `uvicorn app.server:app` 后挂到任意容器 / 平台 | Python 3.8+ | 同 ② |
 
 > 打不开线上链接时，先用 ① —— 它是单个 HTML 文件，数据全部内联，不联网、不起服务、双击即开。
 
@@ -55,7 +61,7 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 
 ### 典型使用场景
 
-- 统计局：拉某省分类回收量底表 → 导出六表 Excel → 直接进公报核对流程
+- 统计局：拉某省分类回收量底表 → 导出七表 Excel → 直接进公报核对流程
 - 协会：看八大类结构五年变化，判断废新闻纸类萎缩速度
 - 回收企业：在「企业分布」里筛「山东 + 造纸企业」，找下游直供对象
 - 产废单位：语音问「纸箱 20 斤能卖多少」，或问「涉密文件怎么处理」
@@ -77,7 +83,7 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 - **麦克风自检**：真实读取音频流算 RMS，判断「能不能收音」而不只是「有没有权限」
 - **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 企业 / 投入产出 / 数据说明 七张表）
 - **对话支持语音输入**（浏览器 Web Speech API，失败时在输入框下方显示具体原因）
-- **Web 图形界面**：FastAPI 聊天页 + 区域/历年/分类/企业 四个标签页
+- **Web 图形界面**：FastAPI 聊天页 + 七个标签页（区域 / 历年 / 分类 / 企业 / 投入产出 / 消耗地图 / 设置）
 - **核心零依赖、Python 3.7 起可用**；openpyxl 为可选依赖，缺失时导出接口返回 503 并给出安装提示
 - GitHub Actions 多版本 CI（3.8 / 3.11 / 3.13 跑全量，3.7 跑零依赖核心）
 
@@ -168,38 +174,75 @@ uvicorn app.server:app --reload    # 浏览器打开 http://localhost:8000
 ## 项目结构
 ```
 paper-recycle-agent/
-├── src/paper_recycle_agent/   # 核心包（业务逻辑纯标准库）
-│   ├── knowledge.py           # 知识库（9 类实用回收指引 + 参考价）
-│   ├── data.py                # 年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
-│   ├── stats.py               # 历年序列 + 八大类占比与分类回收量
-│   ├── regions.py             # 全国 + 省级两级统计
-│   ├── enterprises.py         # 企业名录（地理坐标 / 类型 / 主营品类 / 年回收量）
-│   ├── io_table.py            # 投入产出：消耗金额、直接消耗系数、Leontief 逆矩阵
-│   ├── llm.py                 # 模型配置：OpenAI 兼容 API、密钥脱敏、连通性探测
-│   ├── exporter.py            # 多表 Excel 导出（openpyxl，按需导入）
-│   ├── classifier.py          # 分类引擎
-│   ├── pricing.py             # 估价
-│   ├── agent.py               # 对话引擎
-│   └── cli.py                 # 命令行
-├── config/llm.json.example    # 模型配置模板（复制为 llm.json，已被 gitignore）
-├── data/enterprises.csv.example  # 企业名录模板
-├── data/io_matrix.csv.example    # 投入产出矩阵导入格式（仅格式示例，非真实数据）
-├── tests/                     # pytest 单元测试（159 项）
-├── tools/                     # 代码清单 / 离线版构建 / Python 3.7 兼容性校验
-├── app/server.py              # FastAPI 服务（图形界面 + 统计接口 + 导出 + 模型代理）
-├── app/static/index.html      # 界面（区域 / 历年 / 分类 / 企业 / 投入产出 / 地图 / 设置）
-├── run.py                     # 读取 PORT 的统一启动入口
-├── 启动本地版.bat              # 一键启动（纯 ASCII，避免 cmd 按 GBK 解析中文出错）
-├── docs/                      # 使用/贡献/开发日志/代码清单/数据来源
-└── .github/workflows/ci.yml   # CI
+├── src/paper_recycle_agent/       核心包（业务逻辑纯标准库）
+│   ├── knowledge.py               知识库（9 类实用回收指引 + 参考价）
+│   ├── data.py                    年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
+│   ├── stats.py                   历年序列 + 八大类占比与分类回收量
+│   ├── regions.py                 全国 + 省级两级统计
+│   ├── enterprises.py             企业名录（地理坐标 / 类型 / 主营品类 / 年回收量）
+│   ├── io_table.py                投入产出：消耗金额、直接消耗系数、Leontief 逆矩阵
+│   ├── llm.py                     模型配置：OpenAI 兼容 API、密钥脱敏、连通性探测
+│   ├── exporter.py                多表 Excel 导出（openpyxl，按需导入）
+│   ├── classifier.py              分类引擎
+│   ├── pricing.py                 估价
+│   ├── agent.py                   对话引擎
+│   └── cli.py                     命令行
+├── app/server.py                  FastAPI 服务（界面 + 统计接口 + 导出 + 模型代理）
+├── app/static/index.html          界面（七个标签页）
+├── tests/                         pytest 单元测试（169 项）
+├── tools/                         代码清单 / 离线版构建 / 3.7 兼容校验 / 历史自洽校验
+├── config/llm.json.example        模型配置模板（复制为 llm.json，已被 gitignore）
+├── data/enterprises.csv.example   企业名录模板
+├── data/io_matrix.csv.example     投入产出矩阵导入格式（仅格式示例，非真实数据）
+├── docs/                          使用 / 贡献 / 开发日志 / 代码清单 / 数据来源
+├── run.py                         读取 PORT 的统一启动入口
+├── 启动本地版.bat                 一键启动（纯 ASCII，避免 cmd 按 GBK 解析中文出错）
+└── .github/workflows/ci.yml       CI
 ```
 
-## 连续开发说明
-本仓库保留了一条**真实的连续开发历史**：连续 commit + feature 分支 + --no-ff 合并（即 PR 轨迹）+ Issue/里程碑关联。详见 [docs/DEVLOG.md](docs/DEVLOG.md)。
+## 连续开发：这套历史是怎么来的，以及怎么自己查
+
+本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：75 个提交、15 个 feature 分支、
+6 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
+合并提交里带 `closes #N` 与 PR 编号。
+
+但**光说"我是连续开发的"没有意义**，得能被核查。所以：
 
 ```bash
-git log --oneline --graph --all
+# 1. 时间线自洽：父子提交时间必须严格递增，author 与 committer 必须一致
+python tools/check_history.py
+
+# 2. 看分支与合并轨迹
+git log --graph --oneline --all --date-order
+
+# 3. 看某个版本是怎么一步步做出来的
+git log --oneline v1.4.0..v1.5.0
+git show --stat <commit>
 ```
+
+`tools/check_history.py` 会逐条检查下面这些**可证伪**的约束，任一条不满足就以非零码退出，
+CI 每次都会跑：
+
+| 检查项 | 为什么重要 |
+| --- | --- |
+| 父子提交时间严格递增 | 发布提交不可能早于它要发布的内容 |
+| `author date == committer date` | 两者不一致通常意味着历史被事后改过 |
+| 每个 feature 分支都有对应 merge commit | 证明是「分支开发 + 合并」，不是直接往 main 上堆 |
+| 合并提交使用 `--no-ff`（有两个父提交） | 快进合并会抹掉分支存在过的痕迹 |
+| 标签都指向已存在的提交且可达 | 防止出现指向丢失对象的空标签 |
+| 提交信息符合 `类型: 描述` 前缀 | 保证变更可分类、可追溯 |
+
+### 关于本仓库历史的两点如实说明
+
+1. **2026-10-01 → 10-21 的 19 个提交是按开发顺序补录的**，时间戳为重建（所以都落在整点）；
+   10-22 起的 56 个提交是真实连续开发留下的，含秒级时间戳。补录部分保留了真实的
+   代码演进顺序与踩坑记录，但**不应被当作"每天在写代码"的证据**。
+2. **commit message 里的 `Merge PR #N`、`closes #N` 是本地留档**。本仓库目前没有远端，
+   GitHub 上并不存在这些 PR / Issue。把仓库推上去之后，可以运行
+   `bash tools/publish_to_github.sh` 用 `gh` 把 30 个 Issue、6 个里程碑真实建出来，
+   让这些编号真正指向对象——**在那之前，请不要对外声称"有 30 个 Issue"**。
+
+这两条写在这里而不是藏起来，是因为「过程可信」的前提是**经得起核查**，不是看起来像。
 
 ## 文档
 - [使用说明](docs/USAGE.md)
@@ -207,6 +250,8 @@ git log --oneline --graph --all
 - [开发日志](docs/DEVLOG.md)
 - [更新日志](docs/CHANGELOG.md)
 - [代码清单](docs/CODE_LISTING.md)
+- [数据来源与口径](docs/DATA_SOURCES.md)
+- [仓库历史说明](docs/REPO_PROVENANCE.md)　←　这套"连续开发"里哪些是真的、怎么核查
 
 ## License
 MIT © 梁湘瑶 / 阿岩
