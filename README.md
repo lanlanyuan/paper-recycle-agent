@@ -198,7 +198,7 @@ paper-recycle-agent/
 ## 连续开发：这套历史是怎么来的，以及怎么自己查
 
 本仓库不是「一次性把成稿丢进去」，而是按功能一块块长出来的：80+ 个提交、16 个 feature/fix 分支、
-16 个合并提交、7 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
+16 个合并提交、10 个版本标签，每个功能都走「开分支 → 分主题提交 → `--no-ff` 合并」的流程，
 合并提交里带 `closes #N` 与 PR 编号。
 
 但**光说"我是连续开发的"没有意义**，得能被核查。所以：
@@ -230,15 +230,15 @@ CI 每次都会跑：
 ### 关于本仓库历史的三点如实说明
 
 1. **2026-10-01 → 10-21 的 16 个提交是按开发顺序补录的**，时间戳为重建（所以全落在整点或半点）；
-   10-22 起的 69 个提交是真实连续开发留下的，含秒级时间戳。补录部分保留了真实的
+   10-22 起的 72 个提交是真实连续开发留下的，含秒级时间戳。补录部分保留了真实的
    代码演进顺序与踩坑记录，但**不应被当作"每天在写代码"的证据**。
-2. **commit message 里的 `Merge PR #N`、`closes #N` 是本地留档**。把仓库推上去之前，
-   GitHub 上并不存在这些 PR / Issue。推送后运行 `bash tools/publish_to_github.sh --apply`，
-   用 `gh` 把 30 个 Issue、7 个里程碑真实建出来，编号才会指向对象——
-   **在那之前，请不要对外声称"有 30 个 Issue"**。
-3. **CI 配置写好了但从未真正执行过**。`.github/workflows/ci.yml` 要等仓库推到 GitHub
-   才会被触发，第一次 push 之后 `/actions` 页才有真实日志。在那之前，"CI 通过"
-   只能理解为「本地跑过同样的命令」。
+2. **commit message 里的 `Merge PR #N`、`closes #N` 是本地留档**。仓库已经推到 GitHub，
+   但那些编号对应的 PR / Issue 在 GitHub 上**仍然不存在**（PR 无法事后创建）。
+   运行 `bash tools/publish_to_github.sh --apply` 可以用 `gh` 把 30 个 Issue、7 个里程碑
+   真实建出来，让 `closes #N` 有东西可指——**在那之前，请不要对外声称"有 30 个 Issue"**。
+3. **CI 已经真实跑过了**。`.github/workflows/ci.yml` 在首次 push 后触发，
+   截至 v1.6.5 共运行 2 次，均通过（Python 3.8 / 3.11 / 3.13 跑全量，
+   3.7 跑零依赖核心 + 语法兼容校验）。日志在仓库的 `/actions` 页可查。
 
 这三条写在这里而不是藏起来，是因为「过程可信」的前提是**经得起核查**，不是看起来像。
 
@@ -246,19 +246,23 @@ CI 每次都会跑：
 
 | 要素 | 现状 | 判定 |
 | --- | --- | --- |
-| 连续的 commit | 85 个，其中 69 个是真实开发时间 | ✅ |
-| feature 分支 | 16 个，每个都有 `--no-ff` 合并 | ✅ |
+| 连续的 commit | 88 个（截至 v1.6.5），其中 72 个是真实开发时间 | ✅ |
+| feature 分支 | 16 个，每个都有 `--no-ff` 合并，GitHub `/branches` 可见 | ✅ |
+| CI | 已在 GitHub 真实运行 2 次，均通过，日志可查 | ✅ |
 | PR 合并 | 16 次本地合并，GitHub 上 0 个 PR | ⚠️ 形似而非 |
-| CI | 配置就绪，一次没跑过 | ❌ 推上去才真跑 |
-| Issue / 里程碑 | 本地 30 条，GitHub 上 0 条 | ❌ 推上去可补建 |
+| Issue / 里程碑 | 本地 30 条，GitHub 上 0 条 | ❌ 跑脚本可补 |
 
-**2 项真、1 项形似、2 项空。** 推到 GitHub 并跑完 `push_to_github.sh` 与
-`publish_to_github.sh` 之后，能变成 4 项真、1 项补不了（PR 无法事后创建）。
+**3 项真、1 项形似、1 项空。** 跑完 `bash tools/publish_to_github.sh --apply`
+（需要 `gh` CLI）能补到 4 项真；PR 那项补不了——GitHub 不允许事后创建 PR，
+只能靠后续开发真的走一遍「开分支 → push → 开 PR → 合并」。
 展开说明与验证命令见 [docs/REPO_PROVENANCE.md](docs/REPO_PROVENANCE.md)。
 
 ## 上传到 GitHub：怎么拿到 Repo 地址
 
-本地仓库已经就绪（80+ 个提交、16 个合并、7 个标签），缺的只是一个远端。
+> **本仓库已经推送**：<https://github.com/lanlanyuan/paper-recycle-agent>。
+> 下面这套流程给「fork 后自己推一份」或「从零重建」用，步骤完全一样。
+
+本地仓库就绪后（80+ 个提交、16 个合并、10 个标签），缺的只是一个远端。
 
 > 需要**一步不落的手把手版本**（含每个报错怎么处理）？
 > 见 [docs/UPLOAD_TO_GITHUB.md](docs/UPLOAD_TO_GITHUB.md)。下面是精简版。
@@ -287,7 +291,7 @@ bash tools/push_to_github.sh 你的GitHub用户名
 1. **体检**——是不是 git 仓库、工作区有没有未提交改动、有没有把 `config/llm.json`
    或 `data/enterprises.csv` 这类含密钥/私有数据的文件误提交（这条是硬拦截）
 2. **配远端**——`origin` 已存在就 `set-url`，不会因为重复 `add` 而中断
-3. **推送**——`main` + 16 个 `feature/*`/`fix/*` 分支 + 7 个标签（分支必须一起推，
+3. **推送**——`main` + 16 个 `feature/*`/`fix/*` 分支 + 10 个标签（分支必须一起推，
    否则 GitHub 上只剩线性历史，看不出分支开发的过程）
 4. **收尾**——把 README 顶部的 CI 徽章从注释占位符换成真实地址并推一版
 
@@ -309,7 +313,7 @@ https://github.com/你的GitHub用户名/paper-recycle-agent
 git remote add origin https://github.com/你的用户名/paper-recycle-agent.git
 git push -u origin main
 git push origin --all      # 16 个 feature/fix 分支，别漏
-git push origin --tags     # 7 个版本标签
+git push origin --tags     # 10 个版本标签
 ```
 
 `--all` 不能省：只推 `main` 的话 GitHub 上只有一个线性历史，
