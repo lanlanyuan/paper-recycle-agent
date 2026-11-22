@@ -25,6 +25,12 @@
   POST /api/brain/advise -> 五个领域智能体给建议
   POST /api/brain/optimize -> 模拟管理干预，观察跨域传导
   POST /api/brain/reset  -> 重置产业大脑
+  GET  /api/carbon/factors  -> 碳核算排放因子表（国标附录B，带出处）
+  GET  /api/carbon/state -> 碳核算结果 + 活动数据 + 回收Agent状态
+  POST /api/carbon/activity -> 修改示例工厂活动数据并重算
+  POST /api/carbon/scenario -> 情景模拟对比
+  POST /api/carbon/reset -> 重置示例数据
+  POST /api/carbon/bridge-recycle -> 回收量桥接到碳核算原料输入
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
   POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
@@ -49,8 +55,12 @@ from paper_recycle_agent import stats as stats_mod
 from paper_recycle_agent.mill.agents import Orchestrator
 from paper_recycle_agent.brain.engine import IndustryBrain
 from paper_recycle_agent.brain.intelligence import BrainOrchestrator
+from paper_recycle_agent.carbon import factors as carbon_factors
+from paper_recycle_agent.carbon import recycle_agent
+from paper_recycle_agent.carbon.accounting import CarbonAccounting
+from paper_recycle_agent.carbon.model import ActivityData, FuelUse
 
-app = FastAPI(title="废纸回收 Agent 对话助手")
+app = FastAPI(title="造纸工厂多智能体 · 碳核算 Agent")
 
 # 智能工厂仿真：全局单例 + 锁，保证并发请求不会把状态改乱。
 # 这是仿真对象，不连接任何真实设备。
@@ -60,6 +70,10 @@ _MILL_LOCK = threading.Lock()
 # 产业大脑仿真：五条业务链共享数据底座 + 跨域联动（同样是仿真对象）
 _BRAIN = BrainOrchestrator(brain=IndustryBrain())
 _BRAIN_LOCK = threading.Lock()
+
+# 碳核算：活动数据为示例工厂仿真输入，可用接口修改后重算
+_CARBON_ACTIVITY = CarbonAccounting().activity
+_CARBON_LOCK = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -516,6 +530,121 @@ def brain_reset() -> dict:
     with _BRAIN_LOCK:
         _BRAIN = BrainOrchestrator(brain=IndustryBrain())
         return _BRAIN.snapshot()
+
+
+# ---------------- 碳核算 Agent（国标方法） ----------------
+
+class CarbonActivityReq(BaseModel):
+    """更新示例工厂活动数据；字段可选，只更新提供的字段。"""
+
+    factory_name: Optional[str] = None
+    year: Optional[int] = None
+    fuel_quantities: Optional[Dict[str, float]] = None
+    limestone_ton: Optional[float] = None
+    wastewater_cod_removed: Optional[float] = None
+    wastewater_cod_sludge: Optional[float] = None
+    methane_recovered: Optional[float] = None
+    electricity_purchased: Optional[float] = None
+    electricity_exported: Optional[float] = None
+    electric_ef: Optional[float] = None
+    electric_ef_year: Optional[int] = None
+    heat_purchased: Optional[float] = None
+    heat_exported: Optional[float] = None
+    paper_output_wan_ton: Optional[float] = None
+    wastepaper_recycled_wan_ton: Optional[float] = None
+
+
+class CarbonScenarioReq(BaseModel):
+    changes: Dict[str, float]
+
+
+@app.get("/api/carbon/factors")
+def carbon_factor_list() -> dict:
+    """排放因子表（国标附录B，逐条带出处）与公式说明。"""
+    return carbon_factors.all_factors()
+
+
+@app.get("/api/carbon/state")
+def carbon_state() -> dict:
+    """当前核算结果 + 活动数据 + 废纸回收 Agent 状态。"""
+    with _CARBON_LOCK:
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {
+            "result": result,
+            "activity": _CARBON_ACTIVITY.public(),
+            "recycle_agent": recycle_agent.agent_status(),
+            "supply_chain_method": recycle_agent.supply_chain_carbon_demo(),
+        }
+
+
+@app.post("/api/carbon/activity")
+def carbon_update_activity(req: CarbonActivityReq) -> dict:
+    """修改示例工厂活动数据并重算（改完立即返回新结果）。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        a = _CARBON_ACTIVITY
+        for field in ("factory_name", "year", "limestone_ton", "wastewater_cod_removed",
+                      "wastewater_cod_sludge", "methane_recovered", "electricity_purchased",
+                      "electricity_exported", "electric_ef", "electric_ef_year",
+                      "heat_purchased", "heat_exported", "paper_output_wan_ton",
+                      "wastepaper_recycled_wan_ton"):
+            value = getattr(req, field)
+            if value is not None:
+                setattr(a, field, value)
+        if req.fuel_quantities:
+            known = {f.key for f in a.fuels}
+            for key, qty in req.fuel_quantities.items():
+                matched = False
+                for f in a.fuels:
+                    if f.key == key:
+                        f.quantity = qty
+                        matched = True
+                        break
+                if not matched:
+                    a.fuels.append(FuelUse(key, qty))
+        result = CarbonAccounting(a).calculate()
+        return {"ok": True, "result": result, "activity": a.public()}
+
+
+@app.post("/api/carbon/scenario")
+def carbon_scenario(req: CarbonScenarioReq) -> dict:
+    """情景模拟：改若干活动数据，对比基准与情景排放。"""
+    with _CARBON_LOCK:
+        return CarbonAccounting(_CARBON_ACTIVITY).scenario(req.changes)
+
+
+@app.post("/api/carbon/reset")
+def carbon_reset() -> dict:
+    """重置为示例工厂数据。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        _CARBON_ACTIVITY = CarbonAccounting().activity
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {"ok": True, "result": result, "activity": _CARBON_ACTIVITY.public()}
+
+
+@app.post("/api/carbon/bridge-recycle")
+def carbon_bridge_recycle(year: int = 2024, code: Optional[str] = None) -> dict:
+    """从废纸回收 Agent 取回收量，桥接到碳核算的原料输入。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        rec = recycle_agent.recovery_from_stats(year, code)
+        if not rec.get("ok"):
+            return rec
+        # 全国/省级回收量是行业口径，不能直接当单厂数据。
+        # overwrite=False：仅当工厂回收量为 0 时才写入，否则只返回参考值提示用户确认。
+        bridged = recycle_agent.bridge_to_activity(
+            float(rec["recovery_wan_ton"]), _CARBON_ACTIVITY, overwrite=False,
+        )
+        if not bridged.get("ok"):
+            return {"ok": False, "error": "桥接失败"}
+        if not bridged.get("written", True):
+            bridged["hint"] = (
+                "全国/省级回收量为行业统计口径，非单厂数据，未覆盖工厂现有值。"
+                "如需按此量级核算，请确认该厂实际回收量后在输入框中手动填写。"
+            )
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {"ok": True, "recovery": rec, "bridge": bridged, "result": result}
 
 
 @app.get("/export.xlsx")

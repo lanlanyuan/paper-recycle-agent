@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.6.6　生成日期：2026-10-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.9.0　生成日期：2026-11-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`82959d9`
+- 生成时提交：`2dad628`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -16,10 +16,14 @@
 
 ## 一、核心包（src/paper_recycle_agent）
 
-### `src/paper_recycle_agent/__init__.py`（35 行）
+### `src/paper_recycle_agent/__init__.py`（42 行）
 
 ```python
-"""废纸回收 Agent 对话助手。
+"""造纸工厂多智能体系统 · 碳核算 Agent。
+
+核心是碳核算 Agent（carbon/）：按国标方法核算工厂温室气体排放。
+废纸回收助手作为工厂内的废纸回收子 Agent 保留全功能；
+智能工厂（mill/）与产业大脑（brain/）分别是车间层与经营管理层。
 
 最低支持 Python 3.7（核心逻辑纯标准库，无需任何第三方依赖）。
 图形界面额外需要 Python 3.8+ 与 FastAPI；导出 Excel 额外需要 openpyxl。
@@ -34,14 +38,16 @@ if sys.version_info < (3, 7):  # pragma: no cover - 仅在旧解释器上触发
         )
     )
 
-from . import (agent, classifier, data, enterprises, exporter, io_table,  # noqa: E402
-               knowledge, llm, pricing, regions, stats)
+from . import (agent, brain, carbon, classifier, data, enterprises,  # noqa: E402
+               exporter, io_table, knowledge, llm, mill, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.6.6"
+__version__ = "1.9.0"
 
 __all__ = [
     "agent",
+    "brain",
+    "carbon",
     "classifier",
     "data",
     "enterprises",
@@ -49,6 +55,7 @@ __all__ = [
     "io_table",
     "knowledge",
     "llm",
+    "mill",
     "pricing",
     "regions",
     "stats",
@@ -213,6 +220,1278 @@ def _help_text() -> str:
             "9) 导出 Excel：右侧面板点「导出 Excel」，含省级、分类、历年、进口、企业、投入产出、说明七张表。",
         ]
     )
+```
+
+### `src/paper_recycle_agent/brain/__init__.py`（26 行）
+
+```python
+"""造纸产业大脑（仿真演示版）。
+
+对标华泰集团「造纸产业大脑 + 瞬捷云链生态大模型」的业务形态：
+把造纸企业的五条关键业务链——采购 / 生产 / 销售 / 仓储物流 / 资金财务——
+接进一个共享的数据底座，每个业务链一个领域智能体，顶层由产业大脑编排，
+模拟「数据贯通 → 跨域联动 → 决策建议」的全过程。
+
+必须说清楚的三件事
+------------------
+1. 这是**仿真演示**，不是华泰系统的复刻，也不连接任何真实 ERP / MES / 供应链系统；
+2. 所有 KPI 由仿真引擎生成；文档中引用的华泰成效数字（采购成本 -12%、吨纸能耗 -12%、
+   交货 -2 天、物流成本 -8% 等）仅作**对标参考**，标注公开来源，不是本项目成果；
+3. 领域智能体给出的是建议，真实企业经营决策由人做出。
+
+Python 3.7 兼容：只用标准库与 dataclasses。
+"""
+
+from . import domains, engine, intelligence
+from .engine import IndustryBrain
+
+__all__ = [
+    "domains",
+    "engine",
+    "intelligence",
+    "IndustryBrain",
+]
+```
+
+### `src/paper_recycle_agent/brain/domains.py`（157 行）
+
+```python
+"""五条业务链定义：采购 / 生产 / 销售 / 仓储物流 / 资金财务。
+
+对应华泰「产业大脑」公开报道里的五链贯通：
+  供应链（采购）、生产链、销售链、仓储物流链、资金链（财务）。
+
+每个域声明自己的 KPI、数据来源、职责和联动出口。
+KPI 的"基准值"是本仿真内部的相对指标（0-100 或比率），
+不是任何企业的真实经营数据。
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
+
+# 业务链顺序（与华泰五链口径一致）
+ORDER: Tuple[str, ...] = ("procurement", "production", "sales", "logistics", "finance")
+
+# 对标参考：华泰产业大脑公开的量化成效，仅用于界面展示来源标注。
+# 每条都带来源，绝不并入本项目 KPI 的计算。
+BENCHMARKS: List[Dict[str, str]] = [
+    {"domain": "procurement", "metric": "采购成本", "value": "降低 12%",
+     "source": "华泰造纸产业大脑公开报道（百度百科 / 山东省发改委 2025）"},
+    {"domain": "production", "metric": "吨纸能耗 / 断纸次数", "value": "能耗 -12% / 断纸 23→7 次每月",
+     "source": "华泰造纸产业大脑公开报道（百度百科 / 同花顺财经 2025）"},
+    {"domain": "sales", "metric": "客户连接数", "value": "2.2 万家客户",
+     "source": "瞬捷云链生态大模型公开资料（新华网 2025）"},
+    {"domain": "logistics", "metric": "交货时间 / 物流成本", "value": "交货 -2 天 / 物流成本 -8%",
+     "source": "华泰造纸产业大脑公开报道（百度百科 2025）"},
+    {"domain": "finance", "metric": "财务费用", "value": "年节约约 9600 万元",
+     "source": "华泰集团产业创新报道（百家号 2026-09）"},
+]
+
+
+@dataclass(frozen=True)
+class KPI:
+    """一个业务域的关键指标。"""
+
+    key: str
+    label: str
+    unit: str
+    good_direction: str  # "up" 越高越好 / "down" 越低越好
+    base: float  # 仿真基准值
+
+
+@dataclass
+class Domain:
+    """一条业务链。"""
+
+    key: str
+    name: str
+    subtitle: str
+    kpis: List[KPI]
+    duties: List[str]
+    # 该域的决策会影响哪些下游域（跨域联动）
+    influences: List[str] = field(default_factory=list)
+    # 参考的公开规模数字（华泰），仅展示，不参与仿真
+    scale_note: str = ""
+
+
+DOMAINS: Dict[str, Domain] = {
+    "procurement": Domain(
+        key="procurement",
+        name="采购",
+        subtitle="供应商评价 · 集中招标 · 原料成本",
+        kpis=[
+            KPI("supplier_count", "活跃供应商", "家", "up", 17000),
+            KPI("purchase_cost_index", "采购成本指数", "点", "down", 100.0),
+            KPI("raw_material_quality", "原料合格率", "%", "up", 92.0),
+        ],
+        duties=[
+            "评估供应商履约与质量，形成供应商评分",
+            "集中招标比价，压低废纸/木浆采购成本",
+            "原料质量波动提前预警生产链",
+        ],
+        influences=["production", "finance"],
+        scale_note="对标：连接 1.7 万家供应商（公开报道）",
+    ),
+    "production": Domain(
+        key="production",
+        name="生产",
+        subtitle="质量预测 · 断纸预警 · 能耗优化",
+        kpis=[
+            KPI("energy_per_ton", "吨纸能耗指数", "点", "down", 100.0),
+            KPI("pass_rate", "生产合格率", "%", "up", 94.0),
+            KPI("break_risk", "断纸风险", "%", "down", 8.0),
+        ],
+        duties=[
+            "基于工况预测纸张质量，提前干预",
+            "识别断纸前兆，减少非计划停机",
+            "优化蒸汽与电力消耗，降低吨纸能耗",
+        ],
+        influences=["sales", "logistics"],
+        scale_note="对标：质量预测误差降低 66%（公开报道）",
+    ),
+    "sales": Domain(
+        key="sales",
+        name="销售",
+        subtitle="客户画像 · 需求预测 · 订单排程",
+        kpis=[
+            KPI("customer_count", "活跃客户", "家", "up", 22000),
+            KPI("order_fill_rate", "订单满足率", "%", "up", 93.0),
+            KPI("demand_accuracy", "需求预测准确度", "%", "up", 88.0),
+        ],
+        duties=[
+            "按客户历史订单预测需求，指导生产排程",
+            "把客户交期要求传给仓储物流链",
+            "识别高价值客户，优化报价策略",
+        ],
+        influences=["production", "finance"],
+        scale_note="对标：连接 2.2 万家客户（公开报道）",
+    ),
+    "logistics": Domain(
+        key="logistics",
+        name="仓储物流",
+        subtitle="网络货运 · 车辆调度 · 厂内外贯通",
+        kpis=[
+            KPI("vehicle_count", "在途车辆", "辆", "up", 27000),
+            KPI("delivery_days", "平均交货时间", "天", "down", 5.0),
+            KPI("logistics_cost", "物流成本指数", "点", "down", 100.0),
+        ],
+        duties=[
+            "整合厂内外运输，做点对点全程管控",
+            "按订单交期调度车辆与仓容",
+            "运输成本与在途状态回传资金链",
+        ],
+        influences=["finance"],
+        scale_note="对标：连接 2.7 万台运输车辆（公开报道）",
+    ),
+    "finance": Domain(
+        key="finance",
+        name="资金财务",
+        subtitle="银企联云 · 成本归集 · 资金配置",
+        kpis=[
+            KPI("finance_cost_index", "财务费用指数", "点", "down", 100.0),
+            KPI("cost_visibility", "成本可见率", "%", "up", 85.0),
+            KPI("cash_turnover", "资金周转次数", "次/年", "up", 6.0),
+        ],
+        duties=[
+            "归集采购/生产/物流成本，形成全链路成本视图",
+            "基于订单与回款预测现金流",
+            "向采购链反馈预算约束，向销售链反馈账期风险",
+        ],
+        influences=["procurement", "sales"],
+        scale_note="对标：年节约财务费用约 9600 万元（公开报道）",
+    ),
+}
+
+
+def get(key: str) -> Domain:
+    """取业务域定义，未知 key 抛 ValueError。"""
+    if key not in DOMAINS:
+        raise ValueError("未知业务域：%s" % key)
+    return DOMAINS[key]
+
+
+def all_domains() -> List[Domain]:
+    """按五链顺序返回全部业务域。"""
+    return [DOMAINS[k] for k in ORDER]
+```
+
+### `src/paper_recycle_agent/brain/engine.py`（190 行）
+
+```python
+"""产业大脑仿真引擎：共享数据底座 + 跨域联动 + 推演。
+
+核心机制「跨域联动」：一个域的 KPI 变化会沿 influences 影响下游域。
+例如采购成本指数下降 → 生产成本下降 + 财务费用下降。
+这正是华泰产业大脑「五链数据贯通」想解决的问题——本仿真用可解释的规则
+把它做成可观测、可复盘的模型，而不是一句口号。
+
+确定性：给定 seed，KPI 演化完全一致，便于评审复现。
+"""
+
+import random
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from . import domains
+
+
+@dataclass
+class DomainState:
+    """一个业务域在某时刻的状态。"""
+
+    key: str
+    kpis: Dict[str, float] = field(default_factory=dict)
+    # 最近一次联动影响的摘要
+    last_impact: List[str] = field(default_factory=list)
+
+    def public(self, with_def: bool = True) -> Dict[str, object]:
+        out: Dict[str, object] = {
+            "key": self.key,
+            "name": domains.get(self.key).name,
+            "subtitle": domains.get(self.key).subtitle,
+            "kpis": dict(self.kpis),
+            "last_impact": list(self.last_impact),
+            "scale_note": domains.get(self.key).scale_note,
+        }
+        if with_def:
+            out["duties"] = domains.get(self.key).duties
+            out["kpi_defs"] = [
+                {"key": k.key, "label": k.label, "unit": k.unit,
+                 "good_direction": k.good_direction, "base": k.base}
+                for k in domains.get(self.key).kpis
+            ]
+        return out
+
+
+# 联动规则：(源域, 源KPI, 方向, 目标域, 目标KPI, 影响系数)
+# 方向 'down' 表示源 KPI 下降时触发；'up' 表示上升时触发。
+# 影响系数为目标 KPI 的变化量（按基准值的比例）。
+LINK_RULES: List[tuple] = [
+    ("procurement", "purchase_cost_index", "down", "production", "energy_per_ton", 0.12),
+    ("procurement", "purchase_cost_index", "down", "finance", "finance_cost_index", 0.18),
+    ("procurement", "raw_material_quality", "up", "production", "pass_rate", 0.10),
+    ("procurement", "raw_material_quality", "up", "production", "break_risk", -0.15),
+    ("production", "pass_rate", "up", "sales", "order_fill_rate", 0.08),
+    ("production", "break_risk", "down", "logistics", "delivery_days", -0.10),
+    ("production", "energy_per_ton", "down", "finance", "finance_cost_index", 0.09),
+    ("sales", "demand_accuracy", "up", "logistics", "delivery_days", -0.07),
+    ("sales", "order_fill_rate", "up", "finance", "cash_turnover", 0.05),
+    ("logistics", "delivery_days", "down", "finance", "finance_cost_index", 0.05),
+    ("logistics", "logistics_cost", "down", "finance", "finance_cost_index", 0.11),
+    ("finance", "cost_visibility", "up", "procurement", "purchase_cost_index", -0.06),
+]
+
+
+class IndustryBrain:
+    """产业大脑：五域共享底座 + 联动推演。"""
+
+    def __init__(self, seed: int = 2026) -> None:
+        self.rng = random.Random(seed)
+        self.seed = seed
+        self.step = 0
+        self.states: Dict[str, DomainState] = {
+            key: DomainState(key=key) for key in domains.ORDER
+        }
+        self.log: List[Dict[str, object]] = []
+        self._reset_kpis()
+
+    def _reset_kpis(self) -> None:
+        for key, state in self.states.items():
+            state.kpis = {
+                k.key: float(k.base) for k in domains.get(key).kpis
+            }
+            state.last_impact = []
+
+    def _emit(self, event: str, **kw: object) -> None:
+        self.log.append({"step": self.step, "event": event, **kw})
+
+    def reset(self) -> None:
+        self.step = 0
+        self._reset_kpis()
+        self.log = []
+
+    def advance(self) -> None:
+        """推进一个仿真步：KPI 自然波动 → 应用联动 → 记录日志。"""
+        self.step += 1
+
+        # 1) 各域 KPI 在基准附近小幅波动（确定性）
+        for key, state in self.states.items():
+            for kpi in domains.get(key).kpis:
+                base = kpi.base
+                span = abs(base) * 0.02 if base else 1.0
+                delta = self.rng.uniform(-span, span)
+                # 供应商/客户/车辆数这些规模指标整数化
+                value = base + delta
+                if base >= 1000:
+                    value = float(round(value))
+                state.kpis[kpi.key] = round(value, 2)
+            state.last_impact = []
+
+        # 2) 应用联动规则（用上一步的基准偏差作为触发信号）
+        for src, src_kpi, direction, dst, dst_kpi, coef in LINK_RULES:
+            src_state = self.states[src]
+            if src_kpi not in src_state.kpis:
+                continue
+            base = next(k.base for k in domains.get(src).kpis if k.key == src_kpi)
+            current = src_state.kpis[src_kpi]
+            improved = (current < base) if direction == "down" else (current > base)
+            if not improved:
+                continue
+            dst_state = self.states[dst]
+            if dst_kpi not in dst_state.kpis:
+                continue
+            dst_kpi_def = next(k for k in domains.get(dst).kpis if k.key == dst_kpi)
+            # 影响量与偏差幅度成正比，上限 1 个基准跨度
+            deviation = min(abs(current - base) / (abs(base) * 0.02 or 1.0), 1.0)
+            change = base * coef * deviation
+            # 按目标 KPI 的"好方向"决定是加还是减
+            if dst_kpi_def.good_direction == "up":
+                dst_state.kpis[dst_kpi] += change
+                actual_change = change
+            else:
+                dst_state.kpis[dst_kpi] -= change
+                actual_change = -change
+            dst_state.last_impact.append(
+                "%s·%s → %s %+.2f" % (
+                    domains.get(src).name, src_kpi, dst_kpi_def.label, actual_change,
+                )
+            )
+            self._emit("link", src=src, src_kpi=src_kpi, dst=dst,
+                       dst_kpi=dst_kpi, change=round(change, 3))
+
+        # 3) 收敛到合理范围，避免无限叠加
+        for key, state in self.states.items():
+            for kpi in domains.get(key).kpis:
+                v = state.kpis[kpi.key]
+                lo, hi = kpi.base * 0.7, kpi.base * 1.3
+                state.kpis[kpi.key] = round(max(lo, min(hi, v)), 2)
+
+    def run(self, steps: int = 5) -> Dict[str, object]:
+        """连续推演 N 步。"""
+        steps = max(1, min(int(steps), 30))
+        for _ in range(steps):
+            self.advance()
+        return self.snapshot()
+
+    def optimize(self, domain_key: str, kpi_key: str, target: float) -> Dict[str, object]:
+        """模拟一次管理干预：把某域 KPI 直接调到目标值，观察跨域传导。
+
+        这是"产业大脑辅助决策"的演示：改动一个参数，看五条链怎么联动。
+        """
+        domain = domains.get(domain_key)
+        kpi = next((k for k in domain.kpis if k.key == kpi_key), None)
+        if kpi is None:
+            return {"ok": False, "error": "未知 KPI：%s" % kpi_key}
+        state = self.states[domain_key]
+        before = state.kpis[kpi_key]
+        state.kpis[kpi_key] = float(target)
+        self._emit("optimize", domain=domain_key, kpi=kpi_key,
+                   before=round(before, 2), target=float(target))
+        # 传导一轮
+        self.advance()
+        return {"ok": True, "domain": domain_key, "kpi": kpi_key,
+                "before": round(before, 2), "after": float(target),
+                "snapshot": self.snapshot()}
+
+    def snapshot(self, with_defs: bool = True) -> Dict[str, object]:
+        return {
+            "step": self.step,
+            "seed": self.seed,
+            "states": [
+                self.states[k].public(with_def=with_defs) for k in domains.ORDER
+            ],
+            "link_rules": [
+                {"src": r[0], "src_kpi": r[1], "direction": r[2],
+                 "dst": r[3], "dst_kpi": r[4], "coef": r[5]}
+                for r in LINK_RULES
+            ],
+            "benchmarks": domains.BENCHMARKS,
+            "log": self.log[-60:],
+        }
+```
+
+### `src/paper_recycle_agent/brain/intelligence.py`（144 行）
+
+```python
+"""领域智能体：每条业务链一个"大模型"角色 + 产业大脑总编排。
+
+对标瞬捷云链生态大模型「面向造纸产业链的专属 AI」定位：
+每个领域智能体只懂自己那条链，但通过共享数据底座能感知跨域影响。
+
+配置 API Key 时用大模型生成经营建议；未配置时用规则引擎回落，
+保证零依赖可用。每条建议都标注 basis（rule / llm），不冒充确定结论。
+"""
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+from .. import llm
+from . import domains
+from .engine import DomainState, IndustryBrain
+
+
+@dataclass
+class Advice:
+    """一个领域智能体的建议。"""
+
+    domain: str
+    headline: str
+    detail: str
+    basis: str  # rule / llm
+    concerns: List[str]
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "domain": self.domain,
+            "domain_name": domains.get(self.domain).name,
+            "headline": self.headline,
+            "detail": self.detail,
+            "basis": self.basis,
+            "concerns": self.concerns,
+        }
+
+
+_SYSTEM = (
+    "你是造纸企业的「{name}」领域智能体，负责：{subtitle}。\n"
+    "职责：基于给定的业务 KPI 与跨域联动信息，给出简短经营建议。\n"
+    "要求：\n"
+    "1. 只用给定数据，不编造未提供的数字；\n"
+    "2. 中文，两句以内，先结论后理由；\n"
+    "3. 真实经营决策由人做出，你的输出只是建议；\n"
+    "4. 不要复述题目。\n"
+    "你的职责：{duties}"
+)
+
+
+class DomainAgent:
+    """单条业务链的领域智能体。"""
+
+    def __init__(self, domain_key: str) -> None:
+        self.domain = domains.get(domain_key)
+        self.name = "%s智能体" % self.domain.name
+        self.last_advice: Optional[Advice] = None
+
+    def _rule_advice(self, state: DomainState) -> Advice:
+        concerns = []
+        for kpi in self.domain.kpis:
+            val = state.kpis.get(kpi.key)
+            if val is None:
+                continue
+            # 判断 KPI 是否偏离基准且方向不利
+            base = kpi.base
+            bad = (val > base * 1.05) if kpi.good_direction == "down" else (val < base * 0.95)
+            if bad:
+                concerns.append("%s %.2f%s（基准 %.2f）" % (
+                    kpi.label, val, kpi.unit, base,
+                ))
+        if concerns:
+            headline = "关注：" + "、".join(concerns[:2])
+            detail = self.domain.duties[0] + "；" + (
+                self.domain.duties[1] if len(self.domain.duties) > 1 else ""
+            )
+        else:
+            headline = "%s链运行平稳" % self.domain.name
+            detail = self.domain.duties[0]
+        if state.last_impact:
+            detail += "。跨域联动：" + "；".join(state.last_impact[:2])
+        return Advice(self.domain.key, headline, detail, "rule", concerns)
+
+    def advise(self, state: DomainState, use_llm: bool = True) -> Advice:
+        advice = self._rule_advice(state)
+        basis = "rule"
+        if use_llm and llm.load_config().configured():
+            kpi_lines = [
+                "%s=%s%s" % (k.label, state.kpis.get(k.key, 0), k.unit)
+                for k in self.domain.kpis
+            ]
+            system = _SYSTEM.format(
+                name=self.domain.name,
+                subtitle=self.domain.subtitle,
+                duties="；".join(self.domain.duties),
+            )
+            result = llm.chat([
+                {"role": "system", "content": system},
+                {"role": "user", "content": (
+                    "当前 KPI：" + "，".join(kpi_lines) +
+                    ("。跨域联动：" + "；".join(state.last_impact[:2]) if state.last_impact else "")
+                )},
+            ], use_system_prompt=False)
+            if result["ok"] and result["reply"]:
+                advice = Advice(
+                    domain=self.domain.key,
+                    headline=str(result["reply"])[:120],
+                    detail="",
+                    basis="llm",
+                    concerns=advice.concerns,
+                )
+                basis = "llm"
+        advice.basis = basis
+        self.last_advice = advice
+        return advice
+
+
+class BrainOrchestrator:
+    """产业大脑：编排五域智能体，汇总建议。"""
+
+    def __init__(self, brain: Optional[IndustryBrain] = None,
+                 use_llm: bool = True) -> None:
+        self.brain = brain or IndustryBrain()
+        self.use_llm = use_llm
+        self.agents = {key: DomainAgent(key) for key in domains.ORDER}
+
+    def advise_all(self) -> List[Dict[str, object]]:
+        """让五个领域智能体各自给出建议。"""
+        out = []
+        for key in domains.ORDER:
+            advice = self.agents[key].advise(self.brain.states[key], use_llm=self.use_llm)
+            self.brain._emit("advice", domain=key, headline=advice.headline,
+                             basis=advice.basis)
+            out.append(advice.public())
+        return out
+
+    def snapshot(self) -> Dict[str, object]:
+        snap = self.brain.snapshot()
+        snap["advices"] = [
+            agent.last_advice.public()
+            for agent in self.agents.values()
+            if agent.last_advice
+        ]
+        return snap
+```
+
+### `src/paper_recycle_agent/carbon/__init__.py`（35 行）
+
+```python
+"""工厂碳核算 Agent（仿真版，国标方法）。
+
+本包是整个造纸工厂多智能体系统的**核心 Agent**：按国标
+《温室气体排放核算与报告要求 造纸和纸制品生产企业》(GB/T，报批稿)
+的方法，把工厂的活动数据换算成温室气体排放量（tCO₂e）。
+
+核算边界（国标 4.2 / 5.1）
+--------------------------
+    企业排放总量 = 化石燃料燃烧 + 过程排放 + 废水厌氧甲烷
+                 + 购入电力 + 购入热力 − 输出电力 − 输出热力
+
+排放因子来自国标附录 B 的缺省值，每一项都带出处；
+活动数据是**仿真输入**（示例工厂，可改），不是任何真实工厂的实测值。
+
+与废纸回收 Agent 的关系
+-----------------------
+废纸回收 Agent 的回收量折算成「原生浆替代」的减排量，作为范围三减排
+单列展示，不并入国标核算边界（国标边界不含范围三），避免口径混淆。
+
+投入产出表在 ``io_table.py`` 里的直接消耗系数 / Leontief 逆矩阵方法，
+作为「环境扩展投入产出」的可选参考附在供应链碳足迹部分，标注为方法演示。
+
+Python 3.7 兼容：只用标准库与 dataclasses。
+"""
+
+from . import accounting, factors, model, recycle_agent
+from .accounting import CarbonAccounting
+
+__all__ = [
+    "accounting",
+    "factors",
+    "model",
+    "recycle_agent",
+    "CarbonAccounting",
+]
+```
+
+### `src/paper_recycle_agent/carbon/accounting.py`（269 行）
+
+```python
+"""碳核算引擎：严格实现国标五类排放源的计算公式。
+
+公式逐条对应国标正文（见 factors.all_factors()['formula']）：
+    公式4  EF   = CC × OF × 44/12
+    公式3  AD   = FC × NCV
+    公式2  E燃烧 = Σ(AD_i × EF_i)
+    公式5  E过程 = L × EF石灰
+    废水   E_CH4 = (TOW − S) × EF × GWP − R × GWP
+    公式10 E购入电 = AD电 × EF电
+    公式1  E总   = 燃烧 + 过程 + 废水 + 购入电/热 − 输出电/热
+
+每个结果都带 formula 和 source，可手算复核。
+电力因子未配置时该项为 None，总量标注 incomplete=True，
+不假装算出了一个"完整"结果——这是本项目一贯的口径纪律。
+"""
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+from . import factors, model
+from .model import ActivityData, FuelUse
+
+
+@dataclass
+class LineItem:
+    """一个排放源的计算明细。"""
+
+    key: str
+    name: str
+    activity: float  # 活动数据（按各项单位）
+    activity_unit: str
+    ef: Optional[float]  # 排放因子
+    ef_unit: str
+    emission: Optional[float]  # 排放量 tCO2e
+    formula: str
+    source: str
+    detail: str = ""
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "key": self.key,
+            "name": self.name,
+            "activity": round(self.activity, 4),
+            "activity_unit": self.activity_unit,
+            "ef": None if self.ef is None else round(self.ef, 6),
+            "ef_unit": self.ef_unit,
+            "emission": None if self.emission is None else round(self.emission, 3),
+            "formula": self.formula,
+            "source": self.source,
+            "detail": self.detail,
+        }
+
+
+class CarbonAccounting:
+    """碳核算器：输入活动数据，输出按国标口径的核算结果。"""
+
+    def __init__(self, activity: Optional[ActivityData] = None) -> None:
+        self.activity = activity or model.demo_activity()
+
+    # ---------- 五类排放源 ----------
+    def fuel_items(self) -> List[LineItem]:
+        """化石燃料燃烧：逐燃料一行（国标公式2/3/4）。"""
+        items: List[LineItem] = []
+        for use in self.activity.fuels:
+            f = factors.fuel(use.key)
+            ad = use.quantity * f.ncv  # 公式3：AD = FC × NCV
+            ef = f.ef  # 公式4：EF = CC × OF × 44/12
+            emission = ad * ef  # 公式2
+            items.append(LineItem(
+                key="fuel_" + f.key,
+                name=f.name + "燃烧",
+                activity=ad,
+                activity_unit="GJ",
+                ef=ef,
+                ef_unit="tCO2/GJ",
+                emission=emission,
+                formula="E = 消耗量×低位发热×CC×OF×44/12",
+                source=factors.SOURCE_STD,
+                detail="消耗 %.2f %s × NCV %.3f = %.1f GJ" % (
+                    use.quantity, f.unit, f.ncv, ad,
+                ),
+            ))
+        return items
+
+    def process_item(self) -> LineItem:
+        """过程排放：石灰石分解（国标公式5）。"""
+        ad = self.activity.limestone_ton
+        return LineItem(
+            key="process",
+            name="过程排放（石灰石分解）",
+            activity=ad,
+            activity_unit="t",
+            ef=factors.LIMESTONE_EF,
+            ef_unit="tCO2/t",
+            emission=ad * factors.LIMESTONE_EF,
+            formula="E过程 = L × EF石灰（国标公式5）",
+            source=factors.LIMESTONE_EF_SOURCE,
+        )
+
+    def wastewater_item(self) -> LineItem:
+        """废水厌氧处理甲烷（国标公式8/9）。"""
+        a = self.activity
+        net_cod = max(0.0, a.wastewater_cod_removed - a.wastewater_cod_sludge)
+        # E_CH4 = (TOW − S) × EF × GWP − R × GWP
+        emission = net_cod * factors.CH4_MAX * factors.CH4_CORRECTION * factors.GWP_CH4 \
+            - a.methane_recovered * factors.GWP_CH4
+        return LineItem(
+            key="wastewater",
+            name="废水厌氧甲烷",
+            activity=net_cod,
+            activity_unit="tCOD",
+            ef=factors.CH4_MAX * factors.CH4_CORRECTION * factors.GWP_CH4,
+            ef_unit="tCO2e/tCOD",
+            emission=emission,
+            formula="E = (TOW−S)×BO×MF×GWP − R×GWP",
+            source=factors.WAWWATER_SOURCE,
+            detail="净COD %.1f t，BO=%.2f，MF=%.2f，GWP=%d，回收 %.1f tCH4" % (
+                net_cod, factors.CH4_MAX, factors.CH4_CORRECTION,
+                factors.GWP_CH4, a.methane_recovered,
+            ),
+        )
+
+    def electricity_item(self) -> LineItem:
+        """净购入电力（国标公式10/12，合并为净购入）。"""
+        a = self.activity
+        net = a.electricity_purchased - a.electricity_exported
+        ef = a.electric_ef  # 未配置则 None
+        emission = None if ef is None else net * ef
+        return LineItem(
+            key="electricity",
+            name="净购入电力",
+            activity=net,
+            activity_unit="MWh",
+            ef=ef,
+            ef_unit="tCO2/MWh",
+            emission=emission,
+            formula="E = (购入−输出)电量 × EF电（国标公式10/12）",
+            source=(factors.ELECTRIC_EF_SOURCE if ef is not None
+                    else "未配置电力因子——国标要求取主管部门最近年份公布值"),
+            detail=("购入 %.0f − 输出 %.0f = %.0f MWh" % (
+                a.electricity_purchased, a.electricity_exported, net,
+            )) + ("" if ef is not None else "；请在设置中填入 EF 及年份"),
+        )
+
+    def heat_item(self) -> LineItem:
+        """净购入热力（国标公式11/13）。"""
+        a = self.activity
+        net = a.heat_purchased - a.heat_exported
+        emission = net * factors.HEAT_EF_DEFAULT
+        return LineItem(
+            key="heat",
+            name="净购入热力",
+            activity=net,
+            activity_unit="GJ",
+            ef=factors.HEAT_EF_DEFAULT,
+            ef_unit="tCO2/GJ",
+            emission=emission,
+            formula="E = (购入−输出)热力 × EF热（国标公式11/13）",
+            source=factors.HEAT_EF_SOURCE,
+            detail="购入 %.0f − 输出 %.0f = %.0f GJ" % (
+                a.heat_purchased, a.heat_exported, net,
+            ),
+        )
+
+    # ---------- 范围三：废纸回收减排（不计入国标边界） ----------
+    def recycle_credit(self) -> Dict[str, object]:
+        """废纸回收替代原生浆的减排量——范围三演示，单列不并入总量。"""
+        tonnage = self.activity.wastepaper_recycled_wan_ton * 10000.0  # 万吨→吨
+        credit = tonnage * model.RECYCLE_AVOID_COEF
+        return {
+            "wastepaper_ton": round(tonnage, 1),
+            "coef": model.RECYCLE_AVOID_COEF,
+            "coef_unit": "tCO2e/t废纸",
+            "credit_tco2e": round(credit, 1),
+            "scope": "范围三（不计入国标核算边界）",
+            "source": model.RECYCLE_COEF_SOURCE,
+            "note": "减排量为方法演示，不可用于碳交易或正式披露。",
+        }
+
+    # ---------- 汇总 ----------
+    def calculate(self) -> Dict[str, object]:
+        """按国标公式1汇总，返回完整核算结果。"""
+        fuel = self.fuel_items()
+        items = fuel + [
+            self.process_item(),
+            self.wastewater_item(),
+            self.electricity_item(),
+            self.heat_item(),
+        ]
+        # 电力因子未配置 → 该项 None → 总量不完整
+        incomplete = any(it.emission is None for it in items)
+        total = None if incomplete else round(
+            sum(float(it.emission) for it in items), 3  # type: ignore[arg-type]
+        )
+        by_source: Dict[str, Optional[float]] = {}
+        for it in items:
+            prev = by_source.get(it.key)
+            if prev is None:
+                by_source[it.key] = it.emission
+            elif it.emission is not None:
+                by_source[it.key] = prev + it.emission
+
+        output = self.activity.paper_output_wan_ton
+        # 碳强度 = 总排放(tCO2e) ÷ 产量(万吨 × 10000 = 吨) → tCO2e/吨纸
+        intensity = None if (total is None or output <= 0) else round(
+            total / (output * 10000.0), 4
+        )
+
+        return {
+            "factory": self.activity.factory_name,
+            "year": self.activity.year,
+            "provenance": self.activity.provenance,
+            "items": [it.public() for it in items],
+            "by_source": {
+                k: (None if v is None else round(v, 3)) for k, v in by_source.items()
+            },
+            "total_tco2e": total,
+            "output_wan_ton": output,
+            "intensity_tco2e_per_ton": intensity,
+            "intensity_unit": "tCO2e/吨纸",
+            "incomplete": incomplete,
+            "electric_configured": self.activity.electric_ef is not None,
+            "recycle_credit": self.recycle_credit(),
+            "formula": "E总 = 燃烧 + 过程 + 废水CH4 + 购入电/热 − 输出电/热（国标公式1）",
+            "boundary_note": (
+                "本结果为仿真演示：活动数据为示例输入，排放因子取国标附录B缺省值。"
+                "电力因子需按主管部门最新年份配置。不含范围三排放。"
+            ),
+        }
+
+    def scenario(self, changes: Dict[str, float]) -> Dict[str, object]:
+        """情景模拟：改若干活动数据，对比基准与情景的排放变化。
+
+        changes 的 key 形如 'limit:bituminous'（燃料用量）、'electricity_purchased'、'heat_purchased' 等。
+        返回基准与情景两套结果及差额。
+        """
+        import copy
+
+        base = self.calculate()
+        alt_activity = copy.deepcopy(self.activity)
+        for key, value in changes.items():
+            if key.startswith("fuel:"):
+                fk = key.split(":", 1)[1]
+                found = False
+                for fuel_use in alt_activity.fuels:
+                    if fuel_use.key == fk:
+                        fuel_use.quantity = float(value)
+                        found = True
+                        break
+                if not found:
+                    alt_activity.fuels.append(FuelUse(fk, float(value)))
+            elif hasattr(alt_activity, key):
+                setattr(alt_activity, key, float(value))
+        alt = CarbonAccounting(alt_activity).calculate()
+
+        b_total, a_total = base["total_tco2e"], alt["total_tco2e"]
+        delta = None if (b_total is None or a_total is None) else round(a_total - b_total, 3)
+        return {
+            "changes": changes,
+            "baseline": base,
+            "scenario": alt,
+            "delta_tco2e": delta,
+            "interpretation": (
+                "数据不完整，无法计算差额" if delta is None else
+                ("排放下降 %.1f tCO2e（%.2f%%）" % (
+                    -delta, (-delta / b_total * 100) if b_total else 0.0,
+                ) if delta < 0 else "排放上升 %.1f tCO2e" % delta)
+            ),
+        }
+```
+
+### `src/paper_recycle_agent/carbon/factors.py`（152 行）
+
+```python
+"""排放因子库：全部取自国标附录 B，逐条带出处。
+
+来源
+----
+《温室气体排放核算与报告要求 造纸和纸制品生产企业》(GB/T 报批稿)
+附录 B「相关参数缺省值」表 B.1 / B.2 / B.3，以及正文 5.2.5.3。
+
+表 B.1 的上标逐个对应原始出处：
+    a 《中国能源统计年鉴 2013》
+    b 《省级温室气体清单指南（试行）》
+    c 《2006 年 IPCC 国家温室气体清单指南》
+    d 行业经验数据
+
+本模块**不编造任何因子**：每个数值都能指回上表或其出处。
+电力因子国标正文要求「选用国家主管部门最近年份公布的数据」，
+这里不硬编码一个可能过期的数值，而是暴露成可配置项并标注来源说明。
+"""
+
+from dataclasses import dataclass
+from typing import Dict, Optional
+
+# 排放因子来源体系（供界面逐条展示）
+SOURCE_STD = "国标附录B（造纸核算标准 报批稿）"
+SOURCE_ENERGY = "《中国能源统计年鉴 2013》（经国标附录B引用）"
+SOURCE_PROV = "《省级温室气体清单指南（试行）》（经国标附录B引用）"
+SOURCE_IPCC = "《2006年IPCC国家温室气体清单指南》（经国标附录B引用）"
+SOURCE_EXP = "行业经验数据（经国标附录B引用）"
+SOURCE_MEE = "生态环境部公布的全国电网平均排放因子（需按最新年份填入）"
+
+
+@dataclass(frozen=True)
+class FuelFactor:
+    """一种化石燃料的参数（国标表 B.1）。"""
+
+    key: str
+    name: str
+    unit: str  # 计量单位：t / 10^4 Nm3
+    ncv: float  # 低位发热量 GJ/t 或 GJ/10^4Nm3
+    cc: float  # 单位热值含碳量 tC/GJ
+    of: float  # 碳氧化率
+    ncv_source: str
+    cc_source: str
+
+    @property
+    def ef(self) -> float:
+        """二氧化碳排放因子 tCO2/GJ = CC × OF × 44/12（国标公式4）。"""
+        return self.cc * self.of * 44.0 / 12.0
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "key": self.key,
+            "name": self.name,
+            "unit": self.unit,
+            "ncv": self.ncv,
+            "ncv_unit": "GJ/t" if self.unit == "t" else "GJ/10^4Nm3",
+            "cc": self.cc,
+            "of": self.of,
+            "ef": round(self.ef, 6),
+            "source": SOURCE_STD,
+            "ncv_source": self.ncv_source,
+            "cc_source": self.cc_source,
+        }
+
+
+# 国标表 B.1 常用化石燃料参数（选取造纸厂常见品种）
+# 数值逐字取自 PDF 表 B.1；上标字母映射到上面的来源常量。
+FUELS: Dict[str, FuelFactor] = {
+    "anthracite": FuelFactor("anthracite", "无烟煤", "t", 26.7, 27.4e-3, 0.94,
+                             SOURCE_IPCC, SOURCE_PROV),
+    "bituminous": FuelFactor("bituminous", "烟煤", "t", 19.570, 26.1e-3, 0.93,
+                             SOURCE_EXP, SOURCE_PROV),
+    "lignite": FuelFactor("lignite", "褐煤", "t", 11.9, 28.0e-3, 0.96,
+                          SOURCE_IPCC, SOURCE_PROV),
+    "washed_coal": FuelFactor("washed_coal", "洗精煤", "t", 26.334, 25.41e-3, 0.90,
+                              SOURCE_ENERGY, SOURCE_PROV),
+    "coke": FuelFactor("coke", "焦炭", "t", 28.435, 29.5e-3, 0.93,
+                       SOURCE_ENERGY, SOURCE_PROV),
+    "petroleum_coke": FuelFactor("petroleum_coke", "石油焦", "t", 32.5, 27.5e-3, 1.00,
+                                 SOURCE_IPCC, SOURCE_PROV),
+    "fuel_oil": FuelFactor("fuel_oil", "燃料油", "t", 41.816, 21.1e-3, 0.98,
+                           SOURCE_ENERGY, SOURCE_PROV),
+    "diesel": FuelFactor("diesel", "柴油", "t", 42.652, 20.2e-3, 0.98,
+                         SOURCE_ENERGY, SOURCE_PROV),
+    "gasoline": FuelFactor("gasoline", "汽油", "t", 43.070, 18.9e-3, 0.98,
+                           SOURCE_ENERGY, SOURCE_PROV),
+    "lng": FuelFactor("lng", "液化天然气", "t", 44.2, 17.2e-3, 0.98,
+                      SOURCE_IPCC, SOURCE_PROV),
+    "lpg": FuelFactor("lpg", "液化石油气", "t", 50.179, 17.2e-3, 0.98,
+                      SOURCE_ENERGY, SOURCE_PROV),
+    "natural_gas": FuelFactor("natural_gas", "天然气", "10^4Nm3", 389.31, 15.3e-3, 0.99,
+                              SOURCE_ENERGY, SOURCE_PROV),
+}
+
+
+def fuel(key: str) -> FuelFactor:
+    """取燃料因子，未知 key 抛 ValueError。"""
+    if key not in FUELS:
+        raise ValueError("未知燃料：%s" % key)
+    return FUELS[key]
+
+
+# 过程排放：石灰石分解因子（国标表 B.2）
+LIMESTONE_EF = 0.405  # tCO2/t
+LIMESTONE_EF_SOURCE = "国标附录B 表B.2（行业经验数据）"
+
+# 废水厌氧处理（国标表 B.3）
+CH4_MAX = 0.25  # tCH4/kgCOD 最大生产能力
+CH4_CORRECTION = 0.5  # 甲烷修正因子
+WAWWATER_SOURCE = "国标附录B 表B.3（行业经验数据）"
+GWP_CH4 = 21  # CH4 的全球变暖潜势（100年），国标正文用于折算 CO2e
+
+# 热力缺省因子（国标正文 5.2.5.3）
+HEAT_EF_DEFAULT = 0.11  # tCO2/GJ
+HEAT_EF_SOURCE = "国标正文 5.2.5.3 缺省值（也可取主管部门最新公布数据）"
+
+# 电力因子：国标要求用主管部门最近年份数据，不内置可能过期的数值。
+# 默认留空，由用户在界面/配置里填；填了必须同时填来源年份。
+ELECTRIC_EF_DEFAULT: Optional[float] = None
+ELECTRIC_EF_SOURCE = SOURCE_MEE
+
+# 生物质：国标口径下生物质燃烧的 CO2 不计入（碳中性假设），
+# 但 CH4 / N2O 需按实际排放因子计入。这里只做口径说明，不做数值假设。
+BIOMASS_NOTE = (
+    "生物质燃料（如黑液、树皮、废纸渣）燃烧产生的 CO2 按碳中性不计入化石排放；"
+    "其 CH4 / N2O 排放如有数据应单独计入（国标 4.2.1 注）。"
+)
+
+
+def all_factors() -> Dict[str, object]:
+    """给界面的完整因子表（含出处）。"""
+    return {
+        "fuels": [f.public() for f in FUELS.values()],
+        "limestone": {"ef": LIMESTONE_EF, "unit": "tCO2/t", "source": LIMESTONE_EF_SOURCE},
+        "wastewater": {
+            "ch4_max": CH4_MAX, "correction": CH4_CORRECTION,
+            "gwp_ch4": GWP_CH4, "source": WAWWATER_SOURCE,
+        },
+        "heat": {"ef": HEAT_EF_DEFAULT, "unit": "tCO2/GJ", "source": HEAT_EF_SOURCE},
+        "electric": {
+            "ef": ELECTRIC_EF_DEFAULT, "unit": "tCO2/MWh",
+            "source": ELECTRIC_EF_SOURCE,
+            "note": "国标要求取主管部门最近年份公布值，请填写并标注年份",
+        },
+        "biomass_note": BIOMASS_NOTE,
+        "formula": {
+            "fuel_ef": "EF = CC × OF × 44/12（国标公式4）",
+            "fuel_ad": "AD = FC × NCV（国标公式3）",
+            "fuel_emission": "E燃烧 = Σ(AD_i × EF_i)（国标公式2）",
+            "process": "E过程 = L × EF石灰（国标公式5）",
+            "total": "E总 = 燃烧 + 过程 + 废水CH4 + 购入电/热 − 输出电/热（国标公式1）",
+        },
+    }
+```
+
+### `src/paper_recycle_agent/carbon/model.py`（121 行）
+
+```python
+"""碳核算数据模型：活动数据输入 + 结果口径标注。
+
+活动数据是**示例工厂的仿真输入**（不是真实工厂实测值），
+用户可以逐项修改。每项都带 provenance，界面上明确显示「示例」。
+
+数据量为一家中型新闻纸/包装纸厂的量级，用于演示计算链，
+不对应任何真实企业。产量、能耗之间不强行追求行业精确的物料平衡——
+仿真演示的目标是让「活动数据 × 排放因子 = 排放量」这条链可核查。
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from . import factors
+
+PROVENANCE_DEMO = "示例（仿真输入，非真实工厂）"
+PROVENANCE_STD = "国标缺省值"
+
+
+@dataclass
+class FuelUse:
+    """一种燃料的消耗量。"""
+
+    key: str
+    quantity: float  # 吨 或 10^4Nm3（按燃料单位）
+    provenance: str = PROVENANCE_DEMO
+
+    def public(self) -> Dict[str, object]:
+        f = factors.fuel(self.key)
+        return {
+            "key": self.key,
+            "name": f.name,
+            "quantity": self.quantity,
+            "unit": f.unit,
+            "provenance": self.provenance,
+        }
+
+
+@dataclass
+class ActivityData:
+    """一家工厂一个核算年度的活动数据。"""
+
+    year: int = 2024
+    factory_name: str = "示例造纸厂"
+    # 化石燃料消耗
+    fuels: List[FuelUse] = field(default_factory=list)
+    # 过程排放：石灰石消耗量（吨）。无制浆工艺可为 0。
+    limestone_ton: float = 0.0
+    # 废水厌氧处理：去除的有机物总量（吨 COD）、污泥清除有机物、甲烷回收（吨）
+    wastewater_cod_removed: float = 0.0
+    wastewater_cod_sludge: float = 0.0
+    methane_recovered: float = 0.0
+    # 外购 / 输出电力（MWh）
+    electricity_purchased: float = 0.0
+    electricity_exported: float = 0.0
+    electric_ef: Optional[float] = None  # tCO2/MWh，None 表示未配置
+    electric_ef_year: Optional[int] = None
+    # 外购 / 输出热力（GJ）
+    heat_purchased: float = 0.0
+    heat_exported: float = 0.0
+    # 产品产量（万吨），用于算单位产品碳强度
+    paper_output_wan_ton: float = 0.0
+    # 废纸回收量（万吨）——来自废纸回收 Agent，仅用于减排演示，不进国标边界
+    wastepaper_recycled_wan_ton: float = 0.0
+    provenance: str = PROVENANCE_DEMO
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "year": self.year,
+            "factory_name": self.factory_name,
+            "fuels": [f.public() for f in self.fuels],
+            "limestone_ton": self.limestone_ton,
+            "wastewater_cod_removed": self.wastewater_cod_removed,
+            "wastewater_cod_sludge": self.wastewater_cod_sludge,
+            "methane_recovered": self.methane_recovered,
+            "electricity_purchased": self.electricity_purchased,
+            "electricity_exported": self.electricity_exported,
+            "electric_ef": self.electric_ef,
+            "electric_ef_year": self.electric_ef_year,
+            "heat_purchased": self.heat_purchased,
+            "heat_exported": self.heat_exported,
+            "paper_output_wan_ton": self.paper_output_wan_ton,
+            "wastepaper_recycled_wan_ton": self.wastepaper_recycled_wan_ton,
+            "provenance": self.provenance,
+        }
+
+
+def demo_activity() -> ActivityData:
+    """一套示例工厂活动数据（仿真演示用，非真实企业）。
+
+    量级参考：中型纸厂年耗烟煤数万吨、外购电力数万 MWh、
+    自备热电联产供汽。数字为演示取整值。
+    """
+    return ActivityData(
+        year=2024,
+        factory_name="示例造纸厂（仿真）",
+        fuels=[
+            FuelUse("bituminous", 32000.0),   # 烟煤 3.2 万吨
+            FuelUse("natural_gas", 850.0),    # 天然气 850 万标方
+            FuelUse("diesel", 420.0),         # 柴油 420 吨（厂内车辆）
+        ],
+        limestone_ton=1200.0,
+        wastewater_cod_removed=1800.0,
+        wastewater_cod_sludge=150.0,
+        methane_recovered=0.0,
+        electricity_purchased=42000.0,        # 42000 MWh
+        electricity_exported=3000.0,          # 自发自用后上网 3000 MWh
+        electric_ef=None,                     # 未配置时该项显示「待配置」
+        electric_ef_year=None,
+        heat_purchased=85000.0,               # 85000 GJ 外购蒸汽
+        heat_exported=0.0,
+        paper_output_wan_ton=28.0,            # 年产 28 万吨纸
+        wastepaper_recycled_wan_ton=18.0,     # 年回收废纸 18 万吨（来自回收Agent）
+    )
+
+
+# 废纸替代原生浆的减排系数（范围三演示）
+# 说明：这是文献常见的量级参考，用于演示方法，明确标注为「演示系数」，
+# 不作正式核算依据。真实核算需按具体浆种、工艺、数据源确定。
+RECYCLE_AVOID_COEF = 0.85  # tCO2e / 吨废纸替代（演示值）
+RECYCLE_COEF_SOURCE = "演示系数（文献量级参考，正式核算须按浆种/工艺实测确定）"
+```
+
+### `src/paper_recycle_agent/carbon/recycle_agent.py`（133 行）
+
+```python
+"""废纸回收 Agent（工厂内子智能体）：把回收数据喂给碳核算。
+
+定位变化
+--------
+原「废纸回收对话助手」在本系统里降级为工厂的一个子 Agent：
+它继续负责分类 / 估价 / 区域统计等原有能力，同时把「回收量」
+作为活动数据提供给碳核算 Agent，折算成范围三的原料替代减排量。
+
+本模块只做**桥接**：从已有的 stats / regions / io_table 取数，
+转换成碳核算需要的输入，不重复实现回收助手的业务逻辑。
+
+投入产出表的角色
+----------------
+按用户要求，「投入产出表的思考剥离出来当成参考」——
+这里用 io_table.leontief_inverse / influence_coefficients 做供应链
+碳足迹的**方法演示**（环境扩展投入产出 EEIOA 的思路），
+明确标注为方法演示、非真实核算，不并入国标核算边界。
+"""
+
+from typing import Dict, List, Optional
+
+from .. import io_table, stats as stats_mod
+
+
+def recovery_from_stats(year: int = 2024, code: Optional[str] = None) -> Dict[str, object]:
+    """从现有回收统计取回收量，作为碳核算的原料输入。
+
+    code=None 取全国；给定省级代码则按占全国比重分摊（沿用 io_table 口径）。
+    """
+    row = None
+    for r in stats_mod.get_history():
+        if int(r["year"]) == year:
+            row = r
+            break
+    if row is None:
+        return {"ok": False, "error": "无该年数据", "year": year}
+
+    national = float(row.get("recovery") or 0.0)
+    share = 1.0
+    scope = "全国"
+    if code and code != "CN":
+        from .. import regions
+        node = regions.get_node(code)
+        if node is not None and node["level"] == "province":
+            share = float(node["stats"]["占全国比重(%)"]) / 100.0  # type: ignore[index]
+            scope = str(node["name"])
+
+    return {
+        "ok": True,
+        "year": year,
+        "scope": scope,
+        "recovery_wan_ton": round(national * share, 1),
+        "national_wan_ton": round(national, 1),
+        "share": round(share, 4),
+        "provenance": "全国为行业年报数据；分省按回收量占比分摊（估算）",
+        "note": "这是行业/区域统计口径，非单厂实际回收量；用于碳核算演示时请按需替换为工厂实测值。",
+    }
+
+
+def bridge_to_activity(recovery_wan_ton: float,
+                       activity: object,
+                       overwrite: bool = True) -> Dict[str, object]:
+    """把回收量写进碳核算活动数据的 wastepaper 字段。
+
+    返回桥接说明。不直接修改调用方之外的数据，由调用方决定是否采用。
+    """
+    from .model import ActivityData
+    if not isinstance(activity, ActivityData):
+        return {"ok": False, "error": "活动数据类型不符"}
+    written = bool(overwrite or activity.wastepaper_recycled_wan_ton <= 0)
+    if written:
+        activity.wastepaper_recycled_wan_ton = float(recovery_wan_ton)
+    return {
+        "ok": True,
+        "written": written,
+        "wastepaper_recycled_wan_ton": activity.wastepaper_recycled_wan_ton,
+        "source": "废纸回收 Agent（stats 回收量）",
+        "note": "该值仅用于范围三减排演示，不进入国标核算边界。",
+    }
+
+
+def supply_chain_carbon_demo(matrix: Optional[List[List[float]]] = None) -> Dict[str, object]:
+    """环境扩展投入产出（EEIOA）方法演示。
+
+    思路：把直接消耗系数矩阵 A 换成「单位产值的碳排放强度向量」后，
+    完全需求（Leontief 逆）可用于估算供应链累积碳足迹：
+        C_total = c × (I − A)^-1 × y
+    这里 c 为各部门直接碳强度，y 为最终需求。
+
+    本演示**不内置任何碳强度向量或最终需求**（那会是编数据），
+    只提供算法骨架：传入矩阵与向量才算得出结果。
+    """
+    if matrix is None:
+        return {
+            "ok": False,
+            "available": False,
+            "method": "环境扩展投入产出（EEIOA）",
+            "formula": "C_total = c × (I−A)^-1 × y",
+            "reason": "未提供投入产出矩阵与部门碳强度向量，不做无数据推算。",
+            "reuse": "io_table.leontief_inverse / influence_coefficients / response_coefficients",
+            "boundary": "方法演示，非国标核算边界，不并入碳核算总量。",
+        }
+    try:
+        inv = io_table.leontief_inverse(matrix)
+        return {
+            "ok": True,
+            "available": True,
+            "method": "环境扩展投入产出（EEIOA）",
+            "formula": "C_total = c × (I−A)^-1 × y",
+            "leontief_inverse": inv,
+            "influence": io_table.influence_coefficients(matrix),
+            "response": io_table.response_coefficients(matrix),
+            "boundary": "方法演示；需另配部门碳强度 c 与最终需求 y 才能算碳足迹。",
+        }
+    except ValueError as exc:
+        return {"ok": False, "error": "矩阵无法求逆：%s" % exc}
+
+
+def agent_status() -> Dict[str, object]:
+    """废纸回收 Agent 在系统里的状态说明（供界面展示）。"""
+    return {
+        "role": "工厂内的废纸回收子 Agent",
+        "source_modules": ["stats", "regions", "io_table", "classifier", "pricing"],
+        "capabilities": [
+            "废纸分类与可回收判定（原有）",
+            "按重量估价（原有）",
+            "区域 / 历年 / 分类统计（原有）",
+            "回收量 → 碳核算原料输入（新增桥接）",
+            "范围三原料替代减排演示（新增）",
+        ],
+        "carbon_link": "回收量经 model.RECYCLE_AVOID_COEF 折算为减排量，单列展示",
+        "io_reference": "投入产出系数与 Leontief 逆作为供应链碳足迹方法参考",
+    }
 ```
 
 ### `src/paper_recycle_agent/classifier.py`（86 行）
@@ -2195,6 +3474,792 @@ def status() -> Dict[str, object]:
     }
 ```
 
+### `src/paper_recycle_agent/mill/__init__.py`（31 行）
+
+```python
+"""造纸工艺全流程智能体（仿真版）。
+
+本包把一个造纸厂的连续流程拆成四道工序，每道工序由一个子智能体负责，
+顶层由总调度智能体（Orchestrator）编排任务、处理异常、下发作业给设备层。
+
+重要边界
+--------
+这是**仿真演示**，不是工业控制系统：
+
+* 工序工况由仿真引擎生成，机器狗 / AGV / PLC 是内存中的模拟对象；
+* 本包不会连接任何真实设备、不发送 MODBUS / OPC UA 指令；
+* 接入真实产线需要安全认证、联锁逻辑与人工复核，超出本项目范围。
+
+设计上复用了本仓库已有的 ``llm.py``（OpenAI 兼容调用）：配置了 API Key 时
+子智能体用大模型给出决策建议；未配置时自动回落到规则引擎，保证零依赖可用。
+
+Python 3.7 兼容：只用标准库与 dataclasses（3.7 引入）。
+"""
+
+from . import agents, devices, processes, simulation
+from .agents import Orchestrator
+from .simulation import MillSimulation
+
+__all__ = [
+    "agents",
+    "devices",
+    "processes",
+    "simulation",
+    "Orchestrator",
+    "MillSimulation",
+]
+```
+
+### `src/paper_recycle_agent/mill/agents.py`（250 行）
+
+```python
+"""多智能体：工序子智能体 + 总调度智能体（Orchestrator）。
+
+分工
+----
+* ProcessAgent：每道工序一个，负责「看工况 → 判异常 → 给处置建议 → 下发作业」。
+  配置了 API Key 时用大模型生成建议；未配置时用知识库规则回落。
+* Orchestrator：按流水线顺序推进批次，汇总各工序状态，
+  在异常时做仲裁（继续 / 降速 / 停机待人工），并记录调度日志。
+
+所有决策都带 ``basis`` 字段，标明是「规则」还是「大模型」给出，
+避免把大模型的建议伪装成确定的工艺结论。
+"""
+
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from .. import llm
+from . import processes
+from .devices import DeviceFleet
+from .simulation import MillSimulation, StageState
+
+
+@dataclass
+class Decision:
+    """一个子智能体的决策结果。"""
+
+    agent: str
+    process: str
+    status: str  # normal / warn / critical
+    advice: str
+    basis: str  # rule / llm
+    actions: List[str] = field(default_factory=list)
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "agent": self.agent,
+            "process": self.process,
+            "status": self.status,
+            "advice": self.advice,
+            "basis": self.basis,
+            "actions": self.actions,
+        }
+
+
+# 工序智能体的系统提示词模板（喂给大模型时替换工序名与知识）
+_AGENT_SYSTEM = (
+    "你是造纸厂的「{name}」工序智能体，负责工序：{subtitle}。\n"
+    "你的职责：根据给定的工况参数判断是否异常，给出简短的处置建议。\n"
+    "要求：\n"
+    "1. 只依据给定数据，不要编造未提供的数值；\n"
+    "2. 建议不超过两句，用中文；\n"
+    "3. 这是仿真演示，涉及停机/判废时请说明「需人工确认」；\n"
+    "4. 直接给结论，不要复述题目。\n"
+    "本工序专家知识：{knowledge}"
+)
+
+
+class ProcessAgent:
+    """单道工序的智能体。"""
+
+    def __init__(self, process_key: str) -> None:
+        self.process = processes.get(process_key)
+        self.name = "%s智能体" % self.process.name
+        self.last_decision: Optional[Decision] = None
+
+    def _system_prompt(self) -> str:
+        return _AGENT_SYSTEM.format(
+            name=self.process.name,
+            subtitle=self.process.subtitle,
+            knowledge="；".join(self.process.knowledge),
+        )
+
+    def _rule_advice(self, stage: StageState) -> str:
+        """规则引擎：按越界参数给建议，完全离线。"""
+        abnormal = [
+            m for m in self.process.metrics
+            if stage.metric_status.get(m.key, "normal") != "normal"
+        ]
+        if not abnormal:
+            return "工况正常，维持当前参数，继续下一工序。"
+        parts = []
+        for m in abnormal:
+            value = stage.metrics.get(m.key)
+            status = stage.metric_status.get(m.key)
+            if value is None:
+                continue
+            tag = "严重偏离" if status == "critical" else "轻微越界"
+            parts.append("%s %s%s（正常 %s–%s %s）" % (
+                m.label, tag, _fmt(value), _fmt(m.low), _fmt(m.high), m.unit,
+            ))
+        # 用第一条专家知识兜底，保证建议有依据
+        hint = self.process.knowledge[0] if self.process.knowledge else "请人工复核。"
+        return "异常：" + "；".join(parts) + "。" + hint
+
+    def decide(self, stage: StageState, use_llm: bool = True) -> Decision:
+        """看工况并决策。大模型失败时自动回落到规则。"""
+        status = stage.overall_status
+        actions: List[str] = []
+        if status == "critical":
+            actions = ["hold", "dispatch_robot_dog"]
+        elif status == "warn":
+            actions = ["slow_down", "notify_plc"]
+
+        advice = self._rule_advice(stage)
+        basis = "rule"
+
+        if use_llm and llm.load_config().configured():
+            lines = [
+                "%s=%s%s（正常 %s–%s）" % (
+                    m.label, _fmt(stage.metrics.get(m.key, 0.0)), m.unit,
+                    _fmt(m.low), _fmt(m.high),
+                )
+                for m in self.process.metrics
+            ]
+            result = llm.chat(
+                [
+                    {"role": "system", "content": self._system_prompt()},
+                    {"role": "user", "content": "当前工况：" + "，".join(lines)},
+                ],
+                use_system_prompt=False,
+            )
+            if result["ok"] and result["reply"]:
+                advice = str(result["reply"])[:300]
+                basis = "llm"
+
+        decision = Decision(
+            agent=self.name,
+            process=self.process.key,
+            status=status,
+            advice=advice,
+            basis=basis,
+            actions=actions,
+        )
+        self.last_decision = decision
+        return decision
+
+
+def _fmt(value: float) -> str:
+    """数值格式化：整数不带小数点，小数保留两位。"""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if abs(f - round(f)) < 1e-9:
+        return str(int(round(f)))
+    return "%.2f" % f
+
+
+class Orchestrator:
+    """总调度智能体：编排四道工序、汇总决策、仲裁异常。"""
+
+    def __init__(self, simulation: Optional[MillSimulation] = None,
+                 fleet: Optional[DeviceFleet] = None,
+                 use_llm: bool = True) -> None:
+        self.sim = simulation or MillSimulation()
+        self.fleet = fleet or DeviceFleet()
+        self.use_llm = use_llm
+        self.agents = {key: ProcessAgent(key) for key in processes.ORDER}
+        self.log: List[Dict[str, object]] = []
+        self._batch_seq = 0
+        self._task_seq = 0
+
+    def _emit(self, event: str, **kw: object) -> None:
+        self.log.append({
+            "step": self.sim.step,
+            "time": round(time.time(), 3),
+            "event": event,
+            **kw,
+        })
+
+    def _next_task_id(self, prefix: str) -> str:
+        self._task_seq += 1
+        return "%s-%03d" % (prefix, self._task_seq)
+
+    def start_batch(self) -> Dict[str, object]:
+        """投一个生产批次，下发首道工序作业。"""
+        self._batch_seq += 1
+        batch = "B%03d" % self._batch_seq
+        self.sim.start_batch(batch)
+        self._emit("batch_start", batch=batch, process="pulping")
+        self._dispatch_process("pulping", "start")
+        return {"batch": batch, "process": "pulping"}
+
+    def _dispatch_process(self, process_key: str, action: str) -> None:
+        sent = self.fleet.dispatch_for(
+            process_key, action, self._next_task_id("T")
+        )
+        self._emit("dispatch", process=process_key, action=action, devices=sent)
+
+    def step(self) -> Dict[str, object]:
+        """推进一个仿真步：设备执行 → 智能体决策 → 工序流转。"""
+        self.sim.advance()
+        results = self.fleet.tick(self.sim.step)
+        for r in results:
+            self._emit("device_done", device=r.device_id, task=r.task_id, message=r.message)
+
+        decisions: List[Dict[str, object]] = []
+        for key in processes.ORDER:
+            stage = self.sim.stages[key]
+            if stage.state not in ("running", "done"):
+                continue
+            decision = self.agents[key].decide(stage, use_llm=self.use_llm)
+            decisions.append(decision.public())
+            self._emit("decision", process=key, status=decision.status,
+                       basis=decision.basis, advice=decision.advice)
+
+            # 异常仲裁：严重异常挂起本批次并派机器狗巡检
+            if decision.status == "critical" and stage.state == "running":
+                self.sim.hold_batch(key)
+                self._emit("arbitration", process=key, action="hold",
+                           reason="工况严重偏离，需人工确认后恢复")
+                self._dispatch_process(key, "inspect")
+            elif decision.status == "warn" and stage.state == "running":
+                self._dispatch_process(key, "adjust")
+
+        # 工序完成判定
+        finished = self.sim.finish_completed()
+        for key in finished:
+            self._emit("process_done", process=key)
+            nxt = self.sim.next_process(key)
+            if nxt:
+                self.sim.begin_process(nxt)
+                self._emit("process_begin", process=nxt)
+                self._dispatch_process(nxt, "start")
+            else:
+                self._emit("batch_complete", batch=self.sim.batch_id)
+
+        return self.snapshot()
+
+    def run_until_idle(self, max_steps: int = 60) -> Dict[str, object]:
+        """连续推进直到流水线空闲或到达最大步数。"""
+        steps = 0
+        while steps < max_steps and not self.sim.all_idle():
+            self.step()
+            steps += 1
+        return self.snapshot()
+
+    def snapshot(self) -> Dict[str, object]:
+        """给 API / 前端的完整快照。"""
+        return {
+            "sim": self.sim.snapshot(),
+            "decisions": [
+                agent.last_decision.public()
+                for agent in self.agents.values()
+                if agent.last_decision
+            ],
+            "devices": self.fleet.snapshot(),
+            "log": self.log[-80:],
+        }
+```
+
+### `src/paper_recycle_agent/mill/devices.py`（152 行）
+
+```python
+"""设备层模拟：AGV、巡检机器狗、PLC。
+
+**全部是内存模拟对象，不连接任何真实硬件。**
+每台设备暴露统一的 ``assign(task)`` 接口，调度器下发任务后，
+设备按自身能力耗时完成并返回结果。这样上层多智能体架构与真实设备
+接口「形状一致」，将来若接真实设备，只需替换本模块的实现。
+
+安全说明：真实工厂里 AI 不应直接下发控制指令，必须经过联锁与人工复核；
+本项目刻意把设备层做成 mock，就是这个边界的体现。
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from . import processes
+
+
+@dataclass
+class Task:
+    """一台设备接收的作业任务。"""
+
+    task_id: str
+    process: str
+    action: str
+    payload: Dict[str, object] = field(default_factory=dict)
+    # 剩余执行步数，0 表示已完成
+    remaining: int = 1
+
+
+@dataclass
+class DeviceResult:
+    """设备执行回执。"""
+
+    device_id: str
+    task_id: str
+    ok: bool
+    message: str
+    step: int = 0
+
+
+@dataclass
+class Device:
+    """设备基类（模拟）。"""
+
+    device_id: str
+    name: str
+    kind: str  # agv / robot_dog / plc
+    speed: int = 1  # 每步推进量
+    current: Optional[Task] = None
+    queue: List[Task] = field(default_factory=list)
+    log: List[DeviceResult] = field(default_factory=list)
+
+    def busy(self) -> bool:
+        return self.current is not None
+
+    def assign(self, task: Task) -> bool:
+        """下发任务；设备忙时排队。"""
+        if self.current is None:
+            self.current = task
+            return True
+        self.queue.append(task)
+        return False
+
+    def tick(self, step: int) -> Optional[DeviceResult]:
+        """推进一步；任务完成时返回回执。"""
+        if self.current is None:
+            return None
+        self.current.remaining -= self.speed
+        if self.current.remaining > 0:
+            return None
+        done = self.current
+        result = DeviceResult(
+            device_id=self.device_id,
+            task_id=done.task_id,
+            ok=True,
+            message="%s 完成 %s / %s" % (self.name, processes.get(done.process).name, done.action),
+            step=step,
+        )
+        self.log.append(result)
+        self.current = None
+        if self.queue:
+            self.current = self.queue.pop(0)
+        return result
+
+    def snapshot(self) -> Dict[str, object]:
+        return {
+            "id": self.device_id,
+            "name": self.name,
+            "kind": self.kind,
+            "status": "busy" if self.busy() else "idle",
+            "current": (
+                {
+                    "task_id": self.current.task_id,
+                    "process": self.current.process,
+                    "action": self.current.action,
+                    "remaining": max(self.current.remaining, 0),
+                }
+                if self.current
+                else None
+            ),
+            "queue_len": len(self.queue),
+            "done_count": len(self.log),
+        }
+
+
+class DeviceFleet:
+    """设备编队，按工序找到对应设备。"""
+
+    def __init__(self) -> None:
+        self.devices: Dict[str, Device] = {
+            "agv-01": Device("agv-01", "AGV 运输车 1 号", "agv", speed=1),
+            "agv-02": Device("agv-02", "AGV 运输车 2 号", "agv", speed=1),
+            "robot-dog-01": Device("robot-dog-01", "巡检机器狗", "robot_dog", speed=1),
+            "plc-pulp": Device("plc-pulp", "制浆 PLC", "plc", speed=2),
+            "plc-paper": Device("plc-paper", "抄纸 PLC", "plc", speed=2),
+            "plc-dryer": Device("plc-dryer", "干燥 PLC", "plc", speed=2),
+            "plc-qc": Device("plc-qc", "质检 PLC", "plc", speed=2),
+        }
+
+    def assign(self, device_id: str, task: Task) -> bool:
+        device = self.devices.get(device_id)
+        if device is None:
+            return False
+        return device.assign(task)
+
+    def tick(self, step: int) -> List[DeviceResult]:
+        results = []
+        for device in self.devices.values():
+            result = device.tick(step)
+            if result is not None:
+                results.append(result)
+        return results
+
+    def dispatch_for(self, process_key: str, action: str, task_id: str,
+                     payload: Optional[Dict[str, object]] = None) -> List[str]:
+        """给某工序的所有责任设备下发同一任务，返回成功下发的设备 id。"""
+        proc = processes.get(process_key)
+        sent = []
+        for device_id in proc.devices:
+            task = Task(
+                task_id="%s-%s" % (task_id, device_id),
+                process=process_key,
+                action=action,
+                payload=dict(payload or {}),
+                remaining=2 if self.devices[device_id].kind == "plc" else 3,
+            )
+            if self.assign(device_id, task):
+                sent.append(device_id)
+        return sent
+
+    def snapshot(self) -> List[Dict[str, object]]:
+        return [d.snapshot() for d in self.devices.values()]
+```
+
+### `src/paper_recycle_agent/mill/processes.py`（141 行）
+
+```python
+"""工序定义：制浆 → 抄纸 → 干燥 → 质检。
+
+每个工序声明自己的工况参数、正常区间、负责设备与专家规则。
+区间数值取自公开的制浆造纸工艺常识，仅用于仿真演示，
+不代表任何具体工厂的实际控制参数（见 docs/MILL_AGENTS.md 的口径说明）。
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
+
+# 工序顺序（仿真流水线按此推进）
+ORDER: Tuple[str, ...] = ("pulping", "papermaking", "drying", "quality")
+
+
+@dataclass(frozen=True)
+class Metric:
+    """一个工况参数及其正常区间。"""
+
+    key: str
+    label: str
+    unit: str
+    low: float
+    high: float
+    # 超出区间多少比例算「严重」，用于异常分级
+    critical_ratio: float = 0.25
+
+    def status(self, value: float) -> str:
+        """返回 normal / warn / critical。"""
+        if self.low <= value <= self.high:
+            return "normal"
+        span = self.high - self.low
+        if span <= 0:
+            return "critical"
+        if value < self.low:
+            dev = (self.low - value) / span
+        else:
+            dev = (value - self.high) / span
+        return "critical" if dev >= self.critical_ratio else "warn"
+
+
+@dataclass
+class Process:
+    """一道工序。"""
+
+    key: str
+    name: str
+    subtitle: str
+    metrics: List[Metric]
+    devices: List[str]
+    knowledge: List[str] = field(default_factory=list)
+    base_time: int = 3  # 正常处理一个批次需要的仿真步数
+
+
+PROCESSES: Dict[str, Process] = {
+    "pulping": Process(
+        key="pulping",
+        name="制浆",
+        subtitle="碎浆 · 脱墨 · 漂白",
+        metrics=[
+            Metric("pulp_consistency", "浆浓", "%", 2.5, 4.5),
+            Metric("pulping_temp", "碎浆温度", "°C", 55, 75),
+            Metric("brightness", "白度", "%ISO", 78, 88),
+        ],
+        devices=["agv-01", "plc-pulp"],
+        knowledge=[
+            "浆浓过高会增大泵送负荷、影响后续筛选；过低则降低产能。",
+            "脱墨段温度偏高有利于油墨剥离，但过高会增加能耗与纤维损伤。",
+            "白度不达标时优先检查漂白剂用量与浆料停留时间。",
+        ],
+        base_time=3,
+    ),
+    "papermaking": Process(
+        key="papermaking",
+        name="抄纸",
+        subtitle="流送 · 成形 · 压榨",
+        metrics=[
+            Metric("machine_speed", "车速", "m/min", 600, 900),
+            Metric("basis_weight", "定量", "g/m²", 60, 120),
+            Metric("pressure", "压榨线压力", "kN/m", 30, 60),
+        ],
+        devices=["plc-paper", "agv-02"],
+        knowledge=[
+            "车速提高时若定量波动变大，应先稳住流送泵的脉冲。",
+            "定量偏轻通常来自上网浓度偏低或脱水过快。",
+            "压榨线压力过高会造成湿部断纸，需与毛毯状态联动判断。",
+        ],
+        base_time=4,
+    ),
+    "drying": Process(
+        key="drying",
+        name="干燥",
+        subtitle="蒸汽优化 · 数字孪生",
+        metrics=[
+            Metric("dryer_temp", "烘缸温度", "°C", 105, 135),
+            Metric("steam_pressure", "蒸汽压力", "MPa", 0.3, 0.6),
+            Metric("moisture", "成纸水分", "%", 5.0, 7.0),
+        ],
+        devices=["plc-dryer", "robot-dog-01"],
+        knowledge=[
+            "干燥是造纸能耗最高的环节，蒸汽压力在小幅波动内优先维持稳定。",
+            "成纸水分偏高会引发后续卷曲折皱，偏低则纸张发脆。",
+            "数字孪生可在不停机的情况下评估提车速对蒸汽单耗的影响。",
+        ],
+        base_time=4,
+    ),
+    "quality": Process(
+        key="quality",
+        name="质检",
+        subtitle="视觉检测 · 定量水分",
+        metrics=[
+            Metric("defect_rate", "缺陷率", "%", 0.0, 1.5),
+            Metric("moisture_check", "抽检水分", "%", 5.0, 7.0),
+            Metric("pass_rate", "合格率", "%", 95.0, 100.0),
+        ],
+        devices=["robot-dog-01", "plc-qc"],
+        knowledge=[
+            "缺陷率连续升高时，向前追溯干燥温度与压榨压力。",
+            "抽检水分与在线水分偏差超过 0.5% 时，先校准在线仪表。",
+            "质检智能体只给出处置建议，判废与放行由人工确认。",
+        ],
+        base_time=2,
+    ),
+}
+
+
+def get(key: str) -> Process:
+    """取工序定义，未知 key 抛 ValueError。"""
+    if key not in PROCESSES:
+        raise ValueError("未知工序：%s" % key)
+    return PROCESSES[key]
+
+
+def all_processes() -> List[Process]:
+    """按流水线顺序返回全部工序。"""
+    return [PROCESSES[k] for k in ORDER]
+
+
+def describe(key: str) -> str:
+    """工序的一句话说明，给前端与对话用。"""
+    p = get(key)
+    return "%s（%s）：%s" % (p.name, p.subtitle, "；".join(p.knowledge[:1]))
+```
+
+### `src/paper_recycle_agent/mill/simulation.py`（187 行）
+
+```python
+"""工艺仿真引擎：确定性、可复现的工况状态机。
+
+设计要点
+--------
+1. **确定性**：给定同一个 seed，工况序列完全一致，便于测试与演示复现。
+   这里用标准库 random.Random(seed)，不用全局随机源。
+2. **状态机**：每道工序有 idle → running → done 状态；批次在工序间流转。
+3. **异常注入**：``inject_anomaly(process, metric, value)`` 可在指定工序
+   强制某个参数越界，用来演示智能体的异常处置链。
+4. **口径诚实**：数值是仿真生成的工艺常识区间内随机值，不是任何真实产线数据。
+"""
+
+import random
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from . import processes
+
+
+@dataclass
+class StageState:
+    """一道工序在某个时刻的状态。"""
+
+    key: str
+    state: str = "idle"  # idle / running / done / held
+    elapsed: int = 0
+    metrics: Dict[str, float] = field(default_factory=dict)
+    metric_status: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def overall_status(self) -> str:
+        """汇总工况：有 critical 就 critical，其次 warn，否则 normal。"""
+        values = list(self.metric_status.values())
+        if "critical" in values:
+            return "critical"
+        if "warn" in values:
+            return "warn"
+        return "normal"
+
+    def public(self) -> Dict[str, object]:
+        return {
+            "key": self.key,
+            "name": processes.get(self.key).name,
+            "subtitle": processes.get(self.key).subtitle,
+            "state": self.state,
+            "elapsed": self.elapsed,
+            "metrics": dict(self.metrics),
+            "metric_status": dict(self.metric_status),
+            "status": self.overall_status,
+        }
+
+
+class MillSimulation:
+    """整厂仿真：管理批次在四道工序间的流转与工况演化。"""
+
+    def __init__(self, seed: int = 2024) -> None:
+        self.rng = random.Random(seed)
+        self.seed = seed
+        self.step = 0
+        self.batch_id: Optional[str] = None
+        self.stages: Dict[str, StageState] = {
+            key: StageState(key=key) for key in processes.ORDER
+        }
+        # 人工注入的异常：{(process, metric): forced_value}
+        self._forced: Dict[tuple, float] = {}
+
+    # ---------- 批次与工序流转 ----------
+    def start_batch(self, batch_id: str) -> None:
+        """开始新批次，重置所有工序状态。"""
+        self.batch_id = batch_id
+        self._forced.clear()
+        for key, stage in self.stages.items():
+            stage.state = "idle"
+            stage.elapsed = 0
+            stage.metrics = {}
+            stage.metric_status = {}
+        self.begin_process("pulping")
+
+    def begin_process(self, key: str) -> None:
+        stage = self.stages[key]
+        stage.state = "running"
+        stage.elapsed = 0
+        self._generate_metrics(stage)
+
+    def next_process(self, key: str) -> Optional[str]:
+        """返回下一道工序 key；末道工序返回 None。"""
+        order = list(processes.ORDER)
+        if key not in order:
+            return None
+        idx = order.index(key)
+        return order[idx + 1] if idx + 1 < len(order) else None
+
+    def finish_completed(self) -> List[str]:
+        """把达到工时且未被挂起的 running 工序标记为 done，返回其 key。"""
+        done = []
+        for key in processes.ORDER:
+            stage = self.stages[key]
+            proc = processes.get(key)
+            if stage.state == "running" and stage.elapsed >= proc.base_time:
+                stage.state = "done"
+                done.append(key)
+        return done
+
+    def hold_batch(self, key: str) -> None:
+        """挂起某工序，等待人工处置。"""
+        self.stages[key].state = "held"
+
+    def resume(self, key: str) -> None:
+        """人工确认后恢复工序。"""
+        stage = self.stages[key]
+        if stage.state == "held":
+            stage.state = "running"
+            stage.elapsed = 0
+            self._generate_metrics(stage)
+
+    def all_idle(self) -> bool:
+        """流水线是否空闲：没有 running 工序，或没有进行中的批次。"""
+        if self.batch_id is None:
+            return True
+        return all(
+            s.state not in ("running",)
+            for s in self.stages.values()
+        )
+
+    # ---------- 工况生成 ----------
+    def _generate_metrics(self, stage: StageState) -> None:
+        """为工序生成一组工况值（正常区间内）并计算状态。"""
+        for m in processes.get(stage.key).metrics:
+            forced = self._forced.get((stage.key, m.key))
+            if forced is not None:
+                value = forced
+            else:
+                # 90% 概率落在区间中部，10% 轻微越界，制造可观测波动
+                if self.rng.random() < 0.1:
+                    span = m.high - m.low
+                    value = self.rng.uniform(m.low - 0.12 * span, m.high + 0.12 * span)
+                else:
+                    value = self.rng.uniform(
+                        m.low + 0.15 * (m.high - m.low),
+                        m.high - 0.15 * (m.high - m.low),
+                    )
+            decimals = 0 if (m.high - m.low) >= 50 else 2
+            stage.metrics[m.key] = round(value, decimals)
+            stage.metric_status[m.key] = m.status(value)
+
+    def advance(self) -> None:
+        """推进一个仿真步：更新工况与工时。"""
+        self.step += 1
+        for key in processes.ORDER:
+            stage = self.stages[key]
+            if stage.state == "running":
+                stage.elapsed += 1
+                self._generate_metrics(stage)
+
+    def inject_anomaly(self, process: str, metric: str, value: float) -> bool:
+        """注入异常：强制某工序的某参数取指定值，直到批次结束。
+
+        返回是否注入成功（工序/参数必须存在）。
+        """
+        proc = processes.get(process)
+        keys = [m.key for m in proc.metrics]
+        if metric not in keys:
+            return False
+        self._forced[(process, metric)] = float(value)
+        stage = self.stages[process]
+        if stage.state == "running":
+            stage.metrics[metric] = float(value)
+            m = next(m for m in proc.metrics if m.key == metric)
+            stage.metric_status[metric] = m.status(float(value))
+        return True
+
+    def clear_anomalies(self) -> None:
+        self._forced.clear()
+
+    # ---------- 对外快照 ----------
+    def snapshot(self) -> Dict[str, object]:
+        return {
+            "step": self.step,
+            "seed": self.seed,
+            "batch": self.batch_id,
+            "idle": self.all_idle(),
+            "stages": [self.stages[k].public() for k in processes.ORDER],
+            "anomalies": [
+                {"process": p, "metric": m, "value": v}
+                for (p, m), v in self._forced.items()
+            ],
+        }
+```
+
 ### `src/paper_recycle_agent/pricing.py`（47 行）
 
 ```python
@@ -2824,7 +4889,7 @@ SOURCES: List[str] = [
 
 ## 二、Web 应用（app/）
 
-### `app/server.py`（412 行）
+### `app/server.py`（708 行）
 
 ```python
 """FastAPI 服务：废纸回收 Agent 的图形界面与对话接口。
@@ -2842,6 +4907,24 @@ SOURCES: List[str] = [
   POST /api/llm/config   -> 保存模型配置
   POST /api/llm/test     -> 连通性探测
   POST /api/llm/chat     -> 走大模型回答（未配置时回落规则引擎）
+  GET  /api/mill/processes -> 智能工厂：四道工序定义与专家知识
+  GET  /api/mill/state   -> 智能工厂：当前仿真快照
+  POST /api/mill/start   -> 投一个新生产批次
+  POST /api/mill/step    -> 推进 N 个仿真步
+  POST /api/mill/run     -> 跑到流水线空闲
+  POST /api/mill/anomaly -> 注入工序参数异常（演示处置链）
+  POST /api/mill/reset   -> 重置仿真
+  GET  /api/brain/state  -> 产业大脑：五域 KPI + 跨域联动 + 对标参考
+  POST /api/brain/run    -> 推演 N 步
+  POST /api/brain/advise -> 五个领域智能体给建议
+  POST /api/brain/optimize -> 模拟管理干预，观察跨域传导
+  POST /api/brain/reset  -> 重置产业大脑
+  GET  /api/carbon/factors  -> 碳核算排放因子表（国标附录B，带出处）
+  GET  /api/carbon/state -> 碳核算结果 + 活动数据 + 回收Agent状态
+  POST /api/carbon/activity -> 修改示例工厂活动数据并重算
+  POST /api/carbon/scenario -> 情景模拟对比
+  POST /api/carbon/reset -> 重置示例数据
+  POST /api/carbon/bridge-recycle -> 回收量桥接到碳核算原料输入
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
   POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
@@ -2850,6 +4933,7 @@ SOURCES: List[str] = [
 import io
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -2862,8 +4946,28 @@ from paper_recycle_agent import data as yearbook
 from paper_recycle_agent import (enterprises, exporter, io_table, llm, regions,
                                  respond)
 from paper_recycle_agent import stats as stats_mod
+from paper_recycle_agent.mill.agents import Orchestrator
+from paper_recycle_agent.brain.engine import IndustryBrain
+from paper_recycle_agent.brain.intelligence import BrainOrchestrator
+from paper_recycle_agent.carbon import factors as carbon_factors
+from paper_recycle_agent.carbon import recycle_agent
+from paper_recycle_agent.carbon.accounting import CarbonAccounting
+from paper_recycle_agent.carbon.model import ActivityData, FuelUse
 
-app = FastAPI(title="废纸回收 Agent 对话助手")
+app = FastAPI(title="造纸工厂多智能体 · 碳核算 Agent")
+
+# 智能工厂仿真：全局单例 + 锁，保证并发请求不会把状态改乱。
+# 这是仿真对象，不连接任何真实设备。
+_MILL = Orchestrator()
+_MILL_LOCK = threading.Lock()
+
+# 产业大脑仿真：五条业务链共享数据底座 + 跨域联动（同样是仿真对象）
+_BRAIN = BrainOrchestrator(brain=IndustryBrain())
+_BRAIN_LOCK = threading.Lock()
+
+# 碳核算：活动数据为示例工厂仿真输入，可用接口修改后重算
+_CARBON_ACTIVITY = CarbonAccounting().activity
+_CARBON_LOCK = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -3180,6 +5284,263 @@ def llm_chat(req: LLMChatReq) -> dict:
     }
 
 
+# ---------------- 智能工厂仿真（多智能体） ----------------
+
+class MillAnomalyReq(BaseModel):
+    process: str
+    metric: str
+    value: float
+
+
+class MillStepReq(BaseModel):
+    steps: int = 1
+
+
+@app.get("/api/mill/processes")
+def mill_processes() -> dict:
+    """返回四道工序定义（参数区间、责任设备、专家知识）。"""
+    from paper_recycle_agent.mill import processes as proc_mod
+    return {
+        "order": list(proc_mod.ORDER),
+        "processes": {
+            key: {
+                "key": p.key,
+                "name": p.name,
+                "subtitle": p.subtitle,
+                "devices": p.devices,
+                "knowledge": p.knowledge,
+                "base_time": p.base_time,
+                "metrics": [
+                    {
+                        "key": m.key, "label": m.label, "unit": m.unit,
+                        "low": m.low, "high": m.high,
+                    }
+                    for m in p.metrics
+                ],
+            }
+            for key, p in proc_mod.PROCESSES.items()
+        },
+    }
+
+
+@app.get("/api/mill/state")
+def mill_state() -> dict:
+    """当前仿真快照：工序状态、设备、智能体决策、调度日志。"""
+    with _MILL_LOCK:
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/start")
+def mill_start() -> dict:
+    """投一个新生产批次。"""
+    with _MILL_LOCK:
+        _MILL.start_batch()
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/step")
+def mill_step(req: MillStepReq) -> dict:
+    """推进 N 个仿真步（上限 60，防止一次请求跑太久）。"""
+    steps = max(1, min(int(req.steps), 60))
+    with _MILL_LOCK:
+        for _ in range(steps):
+            _MILL.step()
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/run")
+def mill_run() -> dict:
+    """一直跑到流水线空闲。"""
+    with _MILL_LOCK:
+        return _MILL.run_until_idle(max_steps=80)
+
+
+@app.post("/api/mill/anomaly")
+def mill_anomaly(req: MillAnomalyReq) -> dict:
+    """注入异常：强制某工序参数越界，演示智能体处置链。"""
+    with _MILL_LOCK:
+        ok = _MILL.sim.inject_anomaly(req.process, req.metric, req.value)
+        if ok:
+            _MILL._emit("anomaly_injected", process=req.process,
+                        metric=req.metric, value=req.value)
+        return {"ok": ok, "snapshot": _MILL.snapshot()}
+
+
+@app.post("/api/mill/reset")
+def mill_reset() -> dict:
+    """重置仿真（清空日志、批次、异常）。"""
+    global _MILL
+    with _MILL_LOCK:
+        _MILL = Orchestrator()
+        return _MILL.snapshot()
+
+
+# ---------------- 产业大脑仿真（五链贯通） ----------------
+
+class BrainRunReq(BaseModel):
+    steps: int = 5
+
+
+class BrainOptimizeReq(BaseModel):
+    domain: str
+    kpi: str
+    target: float
+
+
+@app.get("/api/brain/state")
+def brain_state() -> dict:
+    """产业大脑快照：五域 KPI、跨域联动规则、对标参考。"""
+    with _BRAIN_LOCK:
+        return _BRAIN.snapshot()
+
+
+@app.post("/api/brain/run")
+def brain_run(req: BrainRunReq) -> dict:
+    """推演 N 步（上限 30）。"""
+    with _BRAIN_LOCK:
+        _BRAIN.brain.run(req.steps)
+        return _BRAIN.snapshot()
+
+
+@app.post("/api/brain/advise")
+def brain_advise() -> dict:
+    """五个领域智能体各自给建议。"""
+    with _BRAIN_LOCK:
+        advices = _BRAIN.advise_all()
+        return {"advices": advices, "snapshot": _BRAIN.snapshot()}
+
+
+@app.post("/api/brain/optimize")
+def brain_optimize(req: BrainOptimizeReq) -> dict:
+    """模拟管理干预：调某域 KPI，观察跨域传导。"""
+    with _BRAIN_LOCK:
+        return _BRAIN.brain.optimize(req.domain, req.kpi, req.target)
+
+
+@app.post("/api/brain/reset")
+def brain_reset() -> dict:
+    """重置产业大脑仿真。"""
+    global _BRAIN
+    with _BRAIN_LOCK:
+        _BRAIN = BrainOrchestrator(brain=IndustryBrain())
+        return _BRAIN.snapshot()
+
+
+# ---------------- 碳核算 Agent（国标方法） ----------------
+
+class CarbonActivityReq(BaseModel):
+    """更新示例工厂活动数据；字段可选，只更新提供的字段。"""
+
+    factory_name: Optional[str] = None
+    year: Optional[int] = None
+    fuel_quantities: Optional[Dict[str, float]] = None
+    limestone_ton: Optional[float] = None
+    wastewater_cod_removed: Optional[float] = None
+    wastewater_cod_sludge: Optional[float] = None
+    methane_recovered: Optional[float] = None
+    electricity_purchased: Optional[float] = None
+    electricity_exported: Optional[float] = None
+    electric_ef: Optional[float] = None
+    electric_ef_year: Optional[int] = None
+    heat_purchased: Optional[float] = None
+    heat_exported: Optional[float] = None
+    paper_output_wan_ton: Optional[float] = None
+    wastepaper_recycled_wan_ton: Optional[float] = None
+
+
+class CarbonScenarioReq(BaseModel):
+    changes: Dict[str, float]
+
+
+@app.get("/api/carbon/factors")
+def carbon_factor_list() -> dict:
+    """排放因子表（国标附录B，逐条带出处）与公式说明。"""
+    return carbon_factors.all_factors()
+
+
+@app.get("/api/carbon/state")
+def carbon_state() -> dict:
+    """当前核算结果 + 活动数据 + 废纸回收 Agent 状态。"""
+    with _CARBON_LOCK:
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {
+            "result": result,
+            "activity": _CARBON_ACTIVITY.public(),
+            "recycle_agent": recycle_agent.agent_status(),
+            "supply_chain_method": recycle_agent.supply_chain_carbon_demo(),
+        }
+
+
+@app.post("/api/carbon/activity")
+def carbon_update_activity(req: CarbonActivityReq) -> dict:
+    """修改示例工厂活动数据并重算（改完立即返回新结果）。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        a = _CARBON_ACTIVITY
+        for field in ("factory_name", "year", "limestone_ton", "wastewater_cod_removed",
+                      "wastewater_cod_sludge", "methane_recovered", "electricity_purchased",
+                      "electricity_exported", "electric_ef", "electric_ef_year",
+                      "heat_purchased", "heat_exported", "paper_output_wan_ton",
+                      "wastepaper_recycled_wan_ton"):
+            value = getattr(req, field)
+            if value is not None:
+                setattr(a, field, value)
+        if req.fuel_quantities:
+            known = {f.key for f in a.fuels}
+            for key, qty in req.fuel_quantities.items():
+                matched = False
+                for f in a.fuels:
+                    if f.key == key:
+                        f.quantity = qty
+                        matched = True
+                        break
+                if not matched:
+                    a.fuels.append(FuelUse(key, qty))
+        result = CarbonAccounting(a).calculate()
+        return {"ok": True, "result": result, "activity": a.public()}
+
+
+@app.post("/api/carbon/scenario")
+def carbon_scenario(req: CarbonScenarioReq) -> dict:
+    """情景模拟：改若干活动数据，对比基准与情景排放。"""
+    with _CARBON_LOCK:
+        return CarbonAccounting(_CARBON_ACTIVITY).scenario(req.changes)
+
+
+@app.post("/api/carbon/reset")
+def carbon_reset() -> dict:
+    """重置为示例工厂数据。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        _CARBON_ACTIVITY = CarbonAccounting().activity
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {"ok": True, "result": result, "activity": _CARBON_ACTIVITY.public()}
+
+
+@app.post("/api/carbon/bridge-recycle")
+def carbon_bridge_recycle(year: int = 2024, code: Optional[str] = None) -> dict:
+    """从废纸回收 Agent 取回收量，桥接到碳核算的原料输入。"""
+    global _CARBON_ACTIVITY
+    with _CARBON_LOCK:
+        rec = recycle_agent.recovery_from_stats(year, code)
+        if not rec.get("ok"):
+            return rec
+        # 全国/省级回收量是行业口径，不能直接当单厂数据。
+        # overwrite=False：仅当工厂回收量为 0 时才写入，否则只返回参考值提示用户确认。
+        bridged = recycle_agent.bridge_to_activity(
+            float(rec["recovery_wan_ton"]), _CARBON_ACTIVITY, overwrite=False,
+        )
+        if not bridged.get("ok"):
+            return {"ok": False, "error": "桥接失败"}
+        if not bridged.get("written", True):
+            bridged["hint"] = (
+                "全国/省级回收量为行业统计口径，非单厂数据，未覆盖工厂现有值。"
+                "如需按此量级核算，请确认该厂实际回收量后在输入框中手动填写。"
+            )
+        result = CarbonAccounting(_CARBON_ACTIVITY).calculate()
+        return {"ok": True, "recovery": rec, "bridge": bridged, "result": result}
+
+
 @app.get("/export.xlsx")
 def export(code: str = "CN", year: Optional[int] = None) -> Response:
     node = regions.get_node(code) or regions.get_node("CN")
@@ -3241,7 +5602,7 @@ def spa_fallback(full_path: str) -> Response:
     return _index_html()
 ```
 
-### `app/static/index.html`（1519 行）
+### `app/static/index.html`（2213 行）
 
 ```html
 <!DOCTYPE html>
@@ -3249,7 +5610,7 @@ def spa_fallback(full_path: str) -> Response:
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>废纸回收 Agent 对话助手</title>
+<title>造纸工厂多智能体 · 碳核算 Agent</title>
 <style>
   :root {
     --bg: #f5f7fa; --panel: #ffffff; --ink: #1f2329; --muted: #6b7280;
@@ -3402,12 +5763,120 @@ def spa_fallback(full_path: str) -> Response:
   .std-cat { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px; font-size: 11px; }
   .std-cat .nm { font-weight: 600; font-size: 12px; }
   .std-cat .ex, .std-cat .nt { color: var(--muted); margin-top: 2px; }
+
+  /* ---------- 智能工厂（多智能体仿真） ---------- */
+  .mill-ctrl { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mill-ctrl button { height: 31px; padding: 0 11px; border-radius: 8px; font-size: 12px;
+                      cursor: pointer; border: 1px solid var(--brand); background: var(--brand); color: #fff; }
+  .mill-ctrl button.ghost { background: #fff; color: var(--brand); }
+  .mill-ctrl button.amber { background: #fff; color: #8a6d1f; border-color: #e2c572; }
+  .mill-ctrl button:disabled { opacity: .55; cursor: default; }
+  .mill-status { font-size: 11.5px; color: var(--muted); margin: 0 0 9px; line-height: 1.5; }
+  .mill-status b { color: var(--ink); }
+  .pipe { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
+  .stage { flex: 1; border: 1px solid var(--border); border-radius: 9px; padding: 7px 6px;
+           background: #fbfcfd; min-width: 0; }
+  .stage.running { border-color: var(--brand); background: #f0f8f3; }
+  .stage.done { border-color: var(--brand-line); background: #eef6f0; }
+  .stage.held { border-color: #e2c572; background: var(--warn-bg); }
+  .stage .nm { font-size: 12px; font-weight: 600; }
+  .stage .st { font-size: 10px; margin-top: 2px; color: var(--muted); }
+  .stage.running .st { color: var(--brand); }
+  .stage.held .st { color: var(--warn-ink); }
+  .stage .mini { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .stage .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; }
+  .dot.normal { background: #4a9d6b; } .dot.warn { background: #e0a33a; } .dot.critical { background: #d64545; }
+  .agent-row { border-left: 3px solid var(--brand-line); padding: 5px 9px; margin-bottom: 5px;
+               background: #fbfcfd; border-radius: 0 7px 7px 0; font-size: 11.5px; line-height: 1.5; }
+  .agent-row.warn { border-left-color: #e0a33a; } .agent-row.critical { border-left-color: #d64545; }
+  .agent-row .who { font-weight: 600; }
+  .agent-row .basis { font-size: 10px; color: var(--muted); }
+  .agent-row .advice { color: var(--ink); margin-top: 2px; }
+  .dev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .dev { border: 1px solid var(--border); border-radius: 7px; padding: 5px 7px; font-size: 11px;
+         background: #fff; display: flex; justify-content: space-between; gap: 5px; }
+  .dev .dn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dev .ds { color: var(--muted); } .dev.busy .ds { color: var(--brand); }
+  .mill-log { max-height: 150px; overflow-y: auto; border: 1px solid var(--border);
+              border-radius: 8px; font-size: 10.5px; line-height: 1.6; padding: 5px 8px; background: #fbfcfd; }
+  .mill-log .ln { border-bottom: 1px dashed var(--border); padding: 1px 0; }
+  .mill-log .ln:last-child { border-bottom: none; }
+  .mill-log .ev { color: var(--brand); } .mill-log .tm { color: var(--muted); }
+  .anomaly-form { display: grid; grid-template-columns: 1fr 1fr 66px; gap: 5px; margin-bottom: 6px; }
+  .anomaly-form select, .anomaly-form input { height: 27px; border: 1px solid var(--border);
+       border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
+  .anomaly-form button { height: 27px; border-radius: 6px; border: 1px solid #e2c572;
+       background: #fff; color: #8a6d1f; font-size: 11px; cursor: pointer; }
+
+  /* ---------- 产业大脑（五链贯通） ---------- */
+  .brain-chain { display: flex; align-items: center; gap: 3px; margin-bottom: 9px; flex-wrap: wrap; }
+  .brain-node { flex: 1; min-width: 58px; border: 1px solid var(--border); border-radius: 8px;
+                padding: 6px 4px; text-align: center; background: #fbfcfd; font-size: 11.5px; }
+  .brain-node .bn { font-weight: 600; }
+  .brain-node .bv { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .brain-arrow { color: var(--brand); font-size: 13px; }
+  .brain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .brain-card { border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px; background: #fff; }
+  .brain-card .bc-h { font-size: 12px; font-weight: 600; margin-bottom: 4px;
+                      display: flex; justify-content: space-between; gap: 5px; }
+  .brain-card .bc-h .tag { font-size: 9.5px; font-weight: 400; color: var(--brand);
+                           background: var(--brand-soft); border-radius: 8px; padding: 1px 6px; }
+  .brain-card .bc-sub { font-size: 10px; color: var(--muted); margin-bottom: 5px; }
+  .brain-kpi { display: flex; justify-content: space-between; font-size: 10.5px;
+               padding: 2px 0; border-bottom: 1px dashed var(--border); }
+  .brain-kpi:last-child { border-bottom: none; }
+  .brain-kpi .k { color: var(--muted); } .brain-kpi .v { font-variant-numeric: tabular-nums; }
+  .brain-impact { font-size: 9.5px; color: #8a6d1f; margin-top: 4px; line-height: 1.4; }
+  .brain-advice { border-left: 3px solid var(--brand-line); padding: 4px 8px; margin-bottom: 4px;
+                  background: #fbfcfd; font-size: 11px; line-height: 1.5; }
+  .brain-advice .bd { color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .bench-row { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px;
+               padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .bench-row:last-child { border-bottom: none; }
+  .bench-row .bv { color: var(--brand); font-weight: 600; white-space: nowrap; }
+  .bench-row .bs { color: var(--muted); font-size: 9.5px; }
+  .opt-form { display: grid; grid-template-columns: 1fr 1fr 62px; gap: 5px; margin-bottom: 6px; }
+  .opt-form select, .opt-form input { height: 27px; border: 1px solid var(--border);
+       border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
+  .opt-form button { height: 27px; border-radius: 6px; border: 1px solid var(--brand);
+       background: var(--brand); color: #fff; font-size: 11px; cursor: pointer; }
+
+  /* ---------- 碳核算 Agent（核心） ---------- */
+  .carbon-hero { border: 1px solid #e8b4b4; border-radius: 11px; padding: 11px 13px;
+                 background: #fef6f6; margin-bottom: 10px; }
+  .carbon-hero .ch-title { font-size: 12px; color: #8a4a4a; }
+  .carbon-hero .ch-total { font-size: 27px; font-weight: 700; color: #a32d2d;
+                           font-variant-numeric: tabular-nums; margin: 3px 0; }
+  .carbon-hero .ch-total .u { font-size: 13px; font-weight: 400; }
+  .carbon-hero .ch-meta { font-size: 11px; color: #8a6d1f; line-height: 1.5; }
+  .carbon-warn { background: var(--warn-bg); border: 1px solid var(--warn-line);
+                 color: var(--warn-ink); border-radius: 8px; padding: 7px 10px;
+                 font-size: 11px; line-height: 1.5; margin-bottom: 9px; }
+  .carbon-bar { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
+  .carbon-bar .cb-lbl { width: 88px; color: var(--muted); flex-shrink: 0; }
+  .carbon-bar .cb-track { flex: 1; height: 13px; background: #eef1f4; border-radius: 3px; overflow: hidden; }
+  .carbon-bar .cb-fill { height: 100%; background: #c06565; border-radius: 3px; }
+  .carbon-bar .cb-val { width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+  .carbon-item { border-bottom: 1px dashed var(--border); padding: 5px 0; font-size: 10.5px; }
+  .carbon-item:last-child { border-bottom: none; }
+  .carbon-item .ci-h { display: flex; justify-content: space-between; gap: 5px; }
+  .carbon-item .ci-h b { font-size: 11.5px; }
+  .carbon-item .ci-formula { color: var(--muted); margin-top: 2px; font-size: 10px; line-height: 1.4; }
+  .carbon-item .ci-src { color: #6b7a9c; font-size: 9.5px; margin-top: 1px; }
+  .carbon-input { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .carbon-input label { font-size: 10.5px; color: var(--muted); display: grid; gap: 2px; }
+  .carbon-input input { height: 26px; border: 1px solid var(--border); border-radius: 6px;
+                        padding: 0 6px; font-size: 11.5px; color: var(--ink); width: 100%;
+                        box-sizing: border-box; }
+  .carbon-credit { background: #eaf3de; border: 1px solid #c0dd97; border-radius: 9px;
+                   padding: 8px 10px; font-size: 11px; line-height: 1.5; }
+  .carbon-credit .v { font-size: 17px; font-weight: 700; color: #3b6d11; }
   @media (max-width: 980px) { .side { display: none; } }
 </style>
 </head>
 <body>
-<header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.6.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 消耗地图 · 语音</span>
+<header>🪨 造纸工厂多智能体 · 碳核算 Agent
+  <span class="sub">v1.9.0 · 碳核算(核心) · 废纸回收Agent · 智能工厂 · 产业大脑 · 区域/历年/分类统计</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -3424,17 +5893,61 @@ def spa_fallback(full_path: str) -> Response:
 
   <aside class="side">
     <div class="tabs">
-      <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
+      <div class="tab active" data-pane="carbon" onclick="switchTab('carbon')">碳核算Agent</div>
+      <div class="tab" data-pane="region" onclick="switchTab('region')">区域统计</div>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
       <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
+      <div class="tab" data-pane="mill" onclick="switchTab('mill')">智能工厂</div>
+      <div class="tab" data-pane="brain" onclick="switchTab('brain')">产业大脑</div>
       <div class="tab" data-pane="map" onclick="switchTab('map')">消耗地图</div>
       <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
 
+    <!-- 碳核算 Agent（核心） -->
+    <section class="pane active" id="pane-carbon">
+      <div class="notice">
+        工厂碳核算 Agent · 按国标《温室气体排放核算与报告要求 造纸和纸制品生产企业》方法。
+        排放因子取国标附录B缺省值（逐项可查出处）；活动数据为<b>示例工厂仿真输入，非真实工厂</b>。
+      </div>
+      <div class="mill-ctrl">
+        <button id="carbonResetBtn" onclick="carbonReset()">恢复示例数据</button>
+        <button class="ghost" id="carbonBridgeBtn" onclick="carbonBridge()">取回收量做原料输入</button>
+      </div>
+
+      <div class="carbon-hero" id="carbonHero"></div>
+      <div class="carbon-warn" id="carbonWarn"></div>
+
+      <div class="sect-title"><span>排放结构（tCO₂e）</span><span class="hintline" id="carbonStructureHint"></span></div>
+      <div id="carbonBars"></div>
+
+      <div class="sect-title"><span>计算明细（公式与出处可查）</span></div>
+      <div class="scroll" style="max-height:230px" id="carbonItems"></div>
+
+      <div class="sect-title"><span>废纸回收 Agent 的减排贡献</span><span class="hintline">范围三，不计入国标总量</span></div>
+      <div class="carbon-credit" id="carbonCredit"></div>
+
+      <div class="sect-title"><span>修改活动数据（改完自动重算）</span><span class="hintline">示例值，可手改验证公式</span></div>
+      <details>
+        <summary style="font-size:11.5px;color:var(--muted);cursor:pointer">展开输入项（煤量、电量、石灰石…）</summary>
+        <div class="carbon-input" id="carbonInputs" style="margin-top:8px"></div>
+        <div class="mill-ctrl" style="margin-top:8px">
+          <button id="carbonApplyBtn" onclick="carbonApply()">应用并重算</button>
+        </div>
+      </details>
+
+      <div class="sect-title"><span>情景模拟</span><span class="hintline">改一个量，看排放变化</span></div>
+      <div class="anomaly-form">
+        <select id="scenField"></select>
+        <input id="scenValue" type="number" step="1" value="0" />
+        <button onclick="carbonScenario()">模拟</button>
+      </div>
+      <div class="mill-status" id="scenResult"></div>
+    </section>
+
     <!-- 区域统计 -->
-    <section class="pane active" id="pane-region">
+    <section class="pane" id="pane-region">
       <div class="crumb" id="crumb"></div>
       <div class="summary" id="summary"></div>
       <div class="notice">
@@ -3615,6 +6128,81 @@ def spa_fallback(full_path: str) -> Response:
       </div>
     </section>
 
+    <!-- 智能工厂（多智能体仿真） -->
+    <section class="pane" id="pane-mill">
+      <div class="notice">
+        仿真演示：四道工序各由一个智能体负责，总调度器编排任务、派机器狗与 AGV 作业。
+        工况为仿真生成，设备为内存模拟对象，<b>不连接任何真实产线</b>。
+      </div>
+      <div class="mill-ctrl">
+        <button id="millStartBtn" onclick="millAction('start')">投批次</button>
+        <button class="ghost" id="millStepBtn" onclick="millAction('step')">单步</button>
+        <button class="ghost" id="millRunBtn" onclick="millAction('run')">自动跑完</button>
+        <button class="ghost" id="millResetBtn" onclick="millAction('reset')">重置</button>
+      </div>
+      <div class="mill-status" id="millStatus">尚未投产，点「投批次」开始。</div>
+
+      <div class="sect-title"><span>工序流水线</span><span class="hintline" id="millStepLabel"></span></div>
+      <div class="pipe" id="millPipe"></div>
+
+      <div class="sect-title"><span>智能体决策</span><span class="hintline">配置 API 后用大模型，否则回落规则</span></div>
+      <div id="millAgents"></div>
+
+      <div class="sect-title"><span>设备任务</span><span class="hintline" id="millDevHint"></span></div>
+      <div class="dev-grid" id="millDevices"></div>
+
+      <div class="sect-title"><span>异常注入（演示处置链）</span></div>
+      <div class="anomaly-form">
+        <select id="anomProcess"></select>
+        <select id="anomMetric"></select>
+        <input id="anomValue" type="number" step="0.1" value="0" />
+      </div>
+      <div class="mill-ctrl" style="margin-bottom:8px">
+        <button class="amber" onclick="millInject()">注入异常</button>
+      </div>
+
+      <div class="sect-title"><span>调度日志</span><span class="hintline" id="millLogHint"></span></div>
+      <div class="mill-log" id="millLog"></div>
+    </section>
+
+    <!-- 产业大脑（五链贯通） -->
+    <section class="pane" id="pane-brain">
+      <div class="notice">
+        仿真演示：对标华泰「产业大脑」五链贯通（采购 / 生产 / 销售 / 仓储物流 / 资金财务），
+        五域共享数据底座，跨域联动可观测。<b>KPI 为仿真值</b>，下方华泰成效仅作对标参考，非本项目成果。
+      </div>
+      <div class="mill-ctrl">
+        <button id="brainRunBtn" onclick="brainAction('run')">推演 5 步</button>
+        <button class="ghost" id="brainAdviseBtn" onclick="brainAction('advise')">领域智能体会商</button>
+        <button class="ghost" id="brainResetBtn" onclick="brainAction('reset')">重置</button>
+      </div>
+      <div class="mill-status" id="brainStatus">产业大脑待推演。</div>
+
+      <div class="sect-title"><span>五条业务链</span><span class="hintline" id="brainStepLabel"></span></div>
+      <div class="brain-chain" id="brainChain"></div>
+
+      <div class="brain-grid" id="brainCards"></div>
+
+      <div class="sect-title"><span>领域智能体建议</span><span class="hintline">配置 API 后用大模型，否则回落规则</span></div>
+      <div id="brainAdvices"></div>
+
+      <div class="sect-title"><span>管理干预推演</span><span class="hintline">改一个 KPI，看跨域传导</span></div>
+      <div class="opt-form">
+        <select id="optDomain"></select>
+        <select id="optKpi"></select>
+        <input id="optTarget" type="number" step="0.1" value="85" />
+      </div>
+      <div class="mill-ctrl" style="margin-bottom:8px">
+        <button class="ghost" onclick="brainOptimize()">执行干预</button>
+      </div>
+
+      <div class="sect-title"><span>华泰公开成效（对标参考）</span><span class="hintline">非本项目成果</span></div>
+      <div id="brainBenchmarks"></div>
+
+      <div class="sect-title"><span>联动日志</span><span class="hintline" id="brainLogHint"></span></div>
+      <div class="mill-log" id="brainLog"></div>
+    </section>
+
     <!-- 消耗地图 -->
     <section class="pane" id="pane-map">
       <div class="yearbar">
@@ -3754,9 +6342,12 @@ def spa_fallback(full_path: str) -> Response:
     document.querySelectorAll(".pane").forEach(p => {
       p.classList.toggle("active", p.id === "pane-" + name);
     });
+    if (name === "carbon") loadCarbon();
     if (name === "enterprise") loadEnterprises();
     if (name === "io") loadIO(state.year);
     if (name === "map") loadMap(state.year);
+    if (name === "mill") loadMill();
+    if (name === "brain") loadBrain();
     if (name === "settings") loadSettings();
   }
 
@@ -4754,12 +7345,476 @@ def spa_fallback(full_path: str) -> Response:
     }
   };
 
-  addMsg("你好，我是废纸回收助手 🪨\n" +
-         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量、某省有哪些回收企业。\n" +
-         "右侧四个标签页：区域统计 / 历年数据 / 分类结构 / 企业分布，都可导出 Excel。\n" +
+  addMsg("你好，我是造纸工厂智能体助手 🪨\n" +
+         "核心能力：碳核算 Agent（国标方法，五大排放源）。废纸回收助手已作为工厂内的子 Agent 接入，为碳核算提供原料回收数据。\n" +
+         "可以问我：废纸能不能回收、值多少钱、回收量、消耗金额；也可在右侧「碳核算Agent」里核算工厂排放。\n" +
          "语音输入若不可用，页面输入框下方会直接告诉你原因。", "bot");
-  loadStats("CN", 2024);
+  loadCarbon();
   loadInfo();
+
+  /* ---------------- 智能工厂（多智能体仿真） ---------------- */
+  let millProcDefs = null;
+  const STATE_LABEL = {idle: "待机", running: "运行中", done: "完成", held: "已挂起"};
+
+  async function loadMill() {
+    if (!millProcDefs) {
+      try {
+        const res = await fetch("/api/mill/processes");
+        millProcDefs = await res.json();
+        fillAnomalySelects();
+      } catch (e) { return; }
+    }
+    await millRefresh();
+  }
+
+  function fillAnomalySelects() {
+    const ps = document.getElementById("anomProcess");
+    const ms = document.getElementById("anomMetric");
+    ps.innerHTML = "";
+    millProcDefs.order.forEach(k => {
+      const o = document.createElement("option");
+      o.value = k; o.textContent = millProcDefs.processes[k].name;
+      ps.appendChild(o);
+    });
+    ps.onchange = fillAnomalyMetrics;
+    fillAnomalyMetrics();
+  }
+
+  function fillAnomalyMetrics() {
+    const k = document.getElementById("anomProcess").value;
+    const ms = document.getElementById("anomMetric");
+    ms.innerHTML = "";
+    (millProcDefs.processes[k].metrics || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.key;
+      o.textContent = m.label + "(" + m.low + "~" + m.high + m.unit + ")";
+      ms.appendChild(o);
+    });
+  }
+
+  async function millRefresh() {
+    try {
+      const res = await fetch("/api/mill/state");
+      renderMill(await res.json());
+    } catch (e) {}
+  }
+
+  function renderMill(snap) {
+    const sim = snap.sim;
+    document.getElementById("millStepLabel").textContent = "仿真步 " + sim.step;
+    document.getElementById("millStatus").innerHTML =
+      sim.batch ? '当前批次 <b>' + sim.batch + '</b> · ' + (sim.idle ? "流水线空闲" : "流水线运行中")
+                : "尚未投产，点「投批次」开始。";
+
+    const pipe = document.getElementById("millPipe");
+    pipe.innerHTML = "";
+    sim.stages.forEach(st => {
+      const d = document.createElement("div");
+      d.className = "stage " + st.state;
+      const dots = Object.keys(st.metric_status || {}).map(k =>
+        '<span class="dot ' + st.metric_status[k] + '"></span>').join("");
+      let mini = "";
+      if (millProcDefs && millProcDefs.processes[st.key]) {
+        mini = millProcDefs.processes[st.key].metrics.map(m => {
+          const v = st.metrics[m.key];
+          return v === undefined ? "" : m.label + " " + v + m.unit;
+        }).filter(Boolean).join("<br>");
+      }
+      d.innerHTML = '<div class="nm">' + dots + st.name + '</div>' +
+                    '<div class="st">' + (STATE_LABEL[st.state] || st.state) + '</div>' +
+                    '<div class="mini">' + mini + '</div>';
+      pipe.appendChild(d);
+    });
+
+    const agents = document.getElementById("millAgents");
+    agents.innerHTML = "";
+    (snap.decisions || []).forEach(dec => {
+      const row = document.createElement("div");
+      row.className = "agent-row " + dec.status;
+      row.innerHTML = '<div><span class="who">' + dec.agent + '</span> ' +
+        '<span class="basis">[' + (dec.basis === "llm" ? "大模型" : "规则引擎") + ']</span></div>' +
+        '<div class="advice">' + esc(dec.advice) + '</div>';
+      agents.appendChild(row);
+    });
+    if (!snap.decisions || !snap.decisions.length)
+      agents.innerHTML = '<div class="mill-status">投产之后，各工序智能体的决策会显示在这里。</div>';
+
+    const devs = document.getElementById("millDevices");
+    devs.innerHTML = "";
+    (snap.devices || []).forEach(dv => {
+      const el = document.createElement("div");
+      el.className = "dev " + (dv.status === "busy" ? "busy" : "");
+      el.innerHTML = '<span class="dn">' + esc(dv.name) + '</span>' +
+        '<span class="ds">' + (dv.status === "busy" ? "作业中" : "空闲") +
+        (dv.done_count ? " · " + dv.done_count : "") + '</span>';
+      devs.appendChild(el);
+    });
+    document.getElementById("millDevHint").textContent =
+      (snap.devices || []).filter(d => d.status === "busy").length + " 台作业中 / 共 " + (snap.devices || []).length + " 台";
+
+    const log = document.getElementById("millLog");
+    log.innerHTML = "";
+    (snap.log || []).slice().reverse().forEach(ln => {
+      const div = document.createElement("div");
+      div.className = "ln";
+      div.innerHTML = '<span class="tm">#' + ln.step + '</span> ' +
+        '<span class="ev">' + esc(ln.event) + '</span> ' +
+        (ln.process ? '[' + esc(ln.process) + '] ' : '') +
+        esc(ln.reason || ln.message || ln.action || "");
+      log.appendChild(div);
+    });
+    document.getElementById("millLogHint").textContent = (snap.log || []).length + " 条";
+  }
+
+  async function millAction(action) {
+    const btn = document.getElementById("mill" + action.charAt(0).toUpperCase() + action.slice(1) + "Btn");
+    if (btn) btn.disabled = true;
+    try {
+      let res;
+      if (action === "start" || action === "run" || action === "reset")
+        res = await fetch("/api/mill/" + action, {method: "POST"});
+      else if (action === "step")
+        res = await fetch("/api/mill/step", {method: "POST",
+          headers: {"Content-Type": "application/json"}, body: JSON.stringify({steps: 1})});
+      if (res) renderMill(await res.json());
+    } catch (e) {} finally { if (btn) btn.disabled = false; }
+  }
+
+  async function millInject() {
+    const process = document.getElementById("anomProcess").value;
+    const metric = document.getElementById("anomMetric").value;
+    const value = parseFloat(document.getElementById("anomValue").value);
+    if (isNaN(value)) return;
+    try {
+      const res = await fetch("/api/mill/anomaly", {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({process: process, metric: metric, value: value})});
+      renderMill((await res.json()).snapshot);
+    } catch (e) {}
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+      ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+  }
+
+  /* ---------------- 产业大脑（五链贯通） ---------------- */
+  async function loadBrain() {
+    await brainRefresh();
+    const ds = document.getElementById("optDomain");
+    if (ds.options.length) return;
+    const states = (window.__brainSnap || {}).states || [];
+    states.forEach(st => {
+      const o = document.createElement("option");
+      o.value = st.key; o.textContent = st.name;
+      ds.appendChild(o);
+    });
+    ds.onchange = fillBrainKpis;
+    fillBrainKpis();
+  }
+
+  function fillBrainKpis() {
+    const key = document.getElementById("optDomain").value;
+    const ks = document.getElementById("optKpi");
+    ks.innerHTML = "";
+    const st = ((window.__brainSnap || {}).states || []).find(s => s.key === key);
+    (st ? st.kpi_defs : []).forEach(k => {
+      const o = document.createElement("option");
+      o.value = k.key; o.textContent = k.label + "(" + k.base + k.unit + ")";
+      ks.appendChild(o);
+    });
+  }
+
+  async function brainRefresh() {
+    try {
+      const res = await fetch("/api/brain/state");
+      const snap = await res.json();
+      window.__brainSnap = snap;
+      renderBrain(snap);
+    } catch (e) {}
+  }
+
+  function renderBrain(snap) {
+    document.getElementById("brainStepLabel").textContent = "推演步 " + snap.step;
+    document.getElementById("brainStatus").innerHTML = snap.step
+      ? '已完成 <b>' + snap.step + '</b> 步推演 · 五链共享数据底座'
+      : "产业大脑待推演。";
+
+    const chain = document.getElementById("brainChain");
+    chain.innerHTML = "";
+    snap.states.forEach((st, i) => {
+      const node = document.createElement("div");
+      node.className = "brain-node";
+      node.innerHTML = '<div class="bn">' + esc(st.name) + '</div>' +
+        '<div class="bv">' + esc(st.subtitle.split("·")[0].trim()) + '</div>';
+      chain.appendChild(node);
+      if (i < snap.states.length - 1) {
+        const ar = document.createElement("span");
+        ar.className = "brain-arrow"; ar.textContent = "→";
+        chain.appendChild(ar);
+      }
+    });
+
+    const cards = document.getElementById("brainCards");
+    cards.innerHTML = "";
+    snap.states.forEach(st => {
+      const card = document.createElement("div");
+      card.className = "brain-card";
+      let kpis = (st.kpi_defs || []).map(k => {
+        const v = st.kpis[k.key];
+        return '<div class="brain-kpi"><span class="k">' + esc(k.label) +
+          '</span><span class="v">' + (v === undefined ? "—" : v + k.unit) + '</span></div>';
+      }).join("");
+      const impact = (st.last_impact || []).length
+        ? '<div class="brain-impact">↳ ' + esc(st.last_impact.slice(0, 2).join("；")) + '</div>' : "";
+      card.innerHTML = '<div class="bc-h"><span>' + esc(st.name) + '</span>' +
+        '<span class="tag">领域智能体</span></div>' +
+        '<div class="bc-sub">' + esc(st.subtitle) + '</div>' + kpis + impact;
+      cards.appendChild(card);
+    });
+
+    const bench = document.getElementById("brainBenchmarks");
+    bench.innerHTML = "";
+    (snap.benchmarks || []).forEach(b => {
+      const row = document.createElement("div");
+      row.className = "bench-row";
+      row.innerHTML = '<span>' + esc(b.metric) +
+        '<div class="bs">' + esc(b.source) + '</div></span>' +
+        '<span class="bv">' + esc(b.value) + '</span>';
+      bench.appendChild(row);
+    });
+
+    const log = document.getElementById("brainLog");
+    log.innerHTML = "";
+    (snap.log || []).slice().reverse().forEach(ln => {
+      const div = document.createElement("div");
+      div.className = "ln";
+      const detail = ln.event === "link"
+        ? esc(ln.src) + '·' + esc(ln.src_kpi) + ' → ' + esc(ln.dst) + '·' + esc(ln.dst_kpi)
+          + ' (' + (ln.change > 0 ? '+' : '') + ln.change + ')'
+        : esc(ln.event) + (ln.domain ? ' [' + esc(ln.domain) + ']' : '');
+      div.innerHTML = '<span class="tm">#' + ln.step + '</span> <span class="ev">' + detail + '</span>';
+      log.appendChild(div);
+    });
+    document.getElementById("brainLogHint").textContent = (snap.log || []).length + " 条";
+  }
+
+  function renderBrainAdvices(advices) {
+    const el = document.getElementById("brainAdvices");
+    el.innerHTML = "";
+    advices.forEach(a => {
+      const row = document.createElement("div");
+      row.className = "brain-advice";
+      row.innerHTML = '<b>' + esc(a.domain_name) + '智能体</b> ' +
+        '<span class="basis">[' + (a.basis === "llm" ? "大模型" : "规则引擎") + ']</span><br>' +
+        esc(a.headline) + (a.detail ? '<div class="bd">' + esc(a.detail) + '</div>' : '');
+      el.appendChild(row);
+    });
+  }
+
+  async function brainAction(action) {
+    const btn = document.getElementById("brain" + action.charAt(0).toUpperCase() + action.slice(1) + "Btn");
+    if (btn) btn.disabled = true;
+    try {
+      let res;
+      if (action === "run") res = await fetch("/api/brain/run", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({steps:5})});
+      else if (action === "advise") res = await fetch("/api/brain/advise", {method:"POST"});
+      else if (action === "reset") res = await fetch("/api/brain/reset", {method:"POST"});
+      const data = await res.json();
+      if (action === "advise") { renderBrain(data.snapshot); renderBrainAdvices(data.advices); }
+      else renderBrain(data);
+    } catch (e) {} finally { if (btn) btn.disabled = false; }
+  }
+
+  async function brainOptimize() {
+    const domain = document.getElementById("optDomain").value;
+    const kpi = document.getElementById("optKpi").value;
+    const target = parseFloat(document.getElementById("optTarget").value);
+    if (!kpi || isNaN(target)) return;
+    try {
+      const res = await fetch("/api/brain/optimize", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({domain:domain, kpi:kpi, target:target})});
+      const data = await res.json();
+      if (data.ok) renderBrain(data.snapshot);
+    } catch (e) {}
+  }
+
+  /* ---------------- 碳核算 Agent（核心） ---------------- */
+  const CARBON_LABEL = {
+    fuel:"化石燃料燃烧", process:"过程排放(石灰石)",
+    wastewater:"废水厌氧甲烷", electricity:"净购入电力", heat:"净购入热力"
+  };
+  let carbonFactorsCache = null;
+
+  async function loadCarbon() {
+    if (!carbonFactorsCache) {
+      try { carbonFactorsCache = await (await fetch("/api/carbon/factors")).json(); }
+      catch (e) {}
+    }
+    await carbonRefresh();
+  }
+
+  async function carbonRefresh() {
+    try {
+      const data = await (await fetch("/api/carbon/state")).json();
+      renderCarbon(data);
+      buildCarbonInputs(data.activity);
+      buildScenarioSelect(data.activity);
+    } catch (e) {}
+  }
+
+  function renderCarbon(data) {
+    const r = data.result;
+    const hero = document.getElementById("carbonHero");
+    if (r.total_tco2e === null) {
+      hero.innerHTML = '<div class="ch-title">' + esc(r.factory) + ' · ' + r.year + ' 年温室气体排放量</div>' +
+        '<div class="ch-total" style="color:var(--muted)">待配置电力因子</div>' +
+        '<div class="ch-meta">填入主管部门最新电力排放因子后即可得出总量。</div>';
+    } else {
+      hero.innerHTML = '<div class="ch-title">' + esc(r.factory) + ' · ' + r.year + ' 年温室气体排放总量</div>' +
+        '<div class="ch-total">' + fmtNum(r.total_tco2e) + '<span class="u"> tCO₂e</span></div>' +
+        '<div class="ch-meta">单位产品碳强度：<b>' + r.intensity_tco2e_per_ton + '</b> ' +
+        esc(r.intensity_unit || 'tCO2e/吨纸') + '（产量 ' + r.output_wan_ton + ' 万吨）</div>';
+    }
+
+    const warn = document.getElementById("carbonWarn");
+    warn.innerHTML = r.incomplete
+      ? '⚠ 核算不完整：电力排放因子未配置。国标要求取主管部门最近年份公布值，填入后总量才有效。'
+      : '✓ 核算边界完整（国标五类排放源）。排放因子为国标附录B缺省值；活动数据为示例输入。';
+
+    const bars = document.getElementById("carbonBars");
+    bars.innerHTML = "";
+    const bySource = r.by_source || {};
+    const maxVal = Math.max(1, ...Object.values(bySource).filter(v => v !== null).map(v => Math.abs(v)));
+    Object.keys(CARBON_LABEL).forEach(k => {
+      const v = bySource[k];
+      const row = document.createElement("div");
+      row.className = "carbon-bar";
+      const pct = (v === null) ? 0 : Math.abs(v) / maxVal * 100;
+      row.innerHTML = '<span class="cb-lbl">' + CARBON_LABEL[k] + '</span>' +
+        '<span class="cb-track"><span class="cb-fill" style="width:' + pct.toFixed(1) + '%"></span></span>' +
+        '<span class="cb-val">' + (v === null ? "待配置" : fmtNum(v)) + '</span>';
+      bars.appendChild(row);
+    });
+    document.getElementById("carbonStructureHint").textContent = "合计 " +
+      (r.total_tco2e === null ? "—" : fmtNum(r.total_tco2e)) + " tCO₂e";
+
+    const items = document.getElementById("carbonItems");
+    items.innerHTML = "";
+    (r.items || []).forEach(it => {
+      const div = document.createElement("div");
+      div.className = "carbon-item";
+      div.innerHTML = '<div class="ci-h"><b>' + esc(it.name) + '</b><span>' +
+        (it.emission === null ? "待配置" : fmtNum(it.emission) + " tCO₂e") + '</span></div>' +
+        '<div class="ci-formula">活动 ' + fmtNum(it.activity) + ' ' + esc(it.activity_unit) +
+        ' × 因子 ' + (it.ef === null ? "—" : it.ef) + ' ' + esc(it.ef_unit) + '</div>' +
+        '<div class="ci-formula">' + esc(it.formula) + (it.detail ? ' ｜ ' + esc(it.detail) : '') + '</div>' +
+        '<div class="ci-src">来源：' + esc(it.source) + '</div>';
+      items.appendChild(div);
+    });
+
+    const c = r.recycle_credit || {};
+    document.getElementById("carbonCredit").innerHTML =
+      '废纸回收 Agent 提供回收量 <b>' + fmtNum(c.wastepaper_ton) + '</b> 吨，' +
+      '按演示系数 ' + c.coef + ' tCO₂e/t 折算减排 <span class="v">' + fmtNum(c.credit_tco2e) + '</span> tCO₂e。' +
+      '<div style="font-size:10px;color:var(--muted);margin-top:4px">' +
+      esc(c.scope) + ' ｜ ' + esc(c.note) + '<br>系数说明：' + esc(c.source) + '</div>';
+
+    document.getElementById("scenResult").textContent = "情景模拟结果将显示在这里。";
+  }
+
+  function fmtNum(v) {
+    if (v === null || v === undefined) return "—";
+    return Number(v).toLocaleString("zh-CN", {maximumFractionDigits:1});
+  }
+
+  function buildCarbonInputs(activity) {
+    const box = document.getElementById("carbonInputs");
+    if (!activity || box.dataset.built === activity.factory_name + activity.year) return;
+    const fields = [
+      ["烟煤(t)", "f FuelUse bituminous", (activity.fuels||[]).find(f=>f.key==='bituminous')?.quantity, "fuel:bituminous"],
+      ["天然气(万m³)", "fuel:natural_gas", (activity.fuels||[]).find(f=>f.key==='natural_gas')?.quantity, "fuel:natural_gas"],
+      ["石灰石(t)", "limestone_ton", activity.limestone_ton, "limestone_ton"],
+      ["外购电力(MWh)", "electricity_purchased", activity.electricity_purchased, "electricity_purchased"],
+      ["电力因子(tCO2/MWh)", "electric_ef", activity.electric_ef, "electric_ef"],
+      ["外购热力(GJ)", "heat_purchased", activity.heat_purchased, "heat_purchased"],
+      ["产量(万吨)", "paper_output_wan_ton", activity.paper_output_wan_ton, "paper_output_wan_ton"],
+      ["废纸回收(万吨)", "wastepaper_recycled_wan_ton", activity.wastepaper_recycled_wan_ton, "wastepaper_recycled_wan_ton"]
+    ];
+    box.innerHTML = "";
+    fields.forEach(f => {
+      const label = document.createElement("label");
+      label.innerHTML = '<span>' + f[0] + '</span><input type="number" step="any" data-cfield="' + f[3] + '" value="' + (f[2]===null||f[2]===undefined?'':f[2]) + '">';
+      box.appendChild(label);
+    });
+    box.dataset.built = activity.factory_name + activity.year;
+  }
+
+  function buildScenarioSelect(activity) {
+    const sel = document.getElementById("scenField");
+    if (!sel.options.length) {
+      [["fuel:bituminous","烟煤用量(t)"],["electricity_purchased","外购电力(MWh)"],
+       ["heat_purchased","外购热力(GJ)"],["limestone_ton","石灰石(t)"]].forEach(o => {
+        const op = document.createElement("option");
+        op.value = o[0]; op.textContent = o[1]; sel.appendChild(op);
+      });
+    }
+  }
+
+  async function carbonApply() {
+    const payload = {fuel_quantities:{}, electric_ef_year:2024};
+    document.querySelectorAll("#carbonInputs input[data-cfield]").forEach(inp => {
+      const key = inp.dataset.cfield, val = parseFloat(inp.value);
+      if (isNaN(val)) return;
+      if (key.indexOf("fuel:") === 0) payload.fuel_quantities[key.slice(5)] = val;
+      else payload[key] = val;
+    });
+    try {
+      const data = await (await fetch("/api/carbon/activity", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)})).json();
+      renderCarbon(data);
+    } catch (e) {}
+  }
+
+  async function carbonScenario() {
+    const field = document.getElementById("scenField").value;
+    const val = parseFloat(document.getElementById("scenValue").value);
+    if (isNaN(val)) return;
+    try {
+      const data = await (await fetch("/api/carbon/scenario", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({changes:{[field]:val}})})).json();
+      document.getElementById("scenResult").innerHTML =
+        '基准 <b>' + fmtNum(data.baseline.total_tco2e) + '</b> → 情景 <b>' +
+        fmtNum(data.scenario.total_tco2e) + '</b> tCO₂e；差额 <b>' +
+        fmtNum(data.delta_tco2e) + '</b> tCO₂e。' + esc(data.interpretation);
+    } catch (e) {}
+  }
+
+  async function carbonBridge() {
+    try {
+      const data = await (await fetch("/api/carbon/bridge-recycle?year=2024", {method:"POST"})).json();
+      if (data.ok) {
+        renderCarbon(data);
+        document.getElementById("carbonInputs").dataset.built = "";
+        buildCarbonInputs(data.activity);
+        if (data.bridge && data.bridge.hint) {
+          document.getElementById("scenResult").textContent = data.bridge.hint;
+        }
+      }
+    } catch (e) {}
+  }
+
+  async function carbonReset() {
+    try {
+      const data = await (await fetch("/api/carbon/reset", {method:"POST"})).json();
+      renderCarbon(data);
+      document.getElementById("carbonInputs").dataset.built = "";
+      buildCarbonInputs(data.activity);
+    } catch (e) {}
+  }
 </script>
 </body>
 </html>
@@ -4870,6 +7925,372 @@ def test_respond_enterprise_type():
 def test_help_mentions_enterprise():
     out = agent.respond("帮助")
     assert "企业名录" in out
+```
+
+### `tests/test_brain.py`（152 行）
+
+```python
+"""产业大脑五链贯通仿真测试。
+
+核心层（无第三方依赖）：五域定义、联动引擎、领域智能体；
+Web 层：FastAPI 接口（缺 fastapi 时跳过）。
+"""
+
+import pytest
+
+from paper_recycle_agent.brain import domains
+from paper_recycle_agent.brain.engine import IndustryBrain, LINK_RULES
+from paper_recycle_agent.brain.intelligence import BrainOrchestrator
+
+
+# ---------------- 五域定义 ----------------
+
+def test_five_domains():
+    assert domains.ORDER == ("procurement", "production", "sales", "logistics", "finance")
+    for key in domains.ORDER:
+        d = domains.get(key)
+        assert d.kpis and d.duties
+        assert d.influences
+
+
+def test_unknown_domain():
+    with pytest.raises(ValueError):
+        domains.get("no_such_domain")
+
+
+def test_benchmarks_have_sources():
+    """每条对标参考都必须带来源，不能出现无出处的数字。"""
+    assert len(domains.BENCHMARKS) == 5
+    for b in domains.BENCHMARKS:
+        assert b["value"] and b["source"]
+        assert "公开" in b["source"] or "报道" in b["source"] or "资料" in b["source"]
+
+
+def test_link_rules_valid():
+    """联动规则的源/目标 KPI 必须真实存在。"""
+    for src, src_kpi, direction, dst, dst_kpi, coef in LINK_RULES:
+        assert src in domains.ORDER and dst in domains.ORDER
+        assert direction in ("up", "down")
+        assert src_kpi in [k.key for k in domains.get(src).kpis]
+        assert dst_kpi in [k.key for k in domains.get(dst).kpis]
+
+
+# ---------------- 仿真引擎 ----------------
+
+def test_deterministic():
+    a = IndustryBrain(seed=7); b = IndustryBrain(seed=7)
+    a.run(4); b.run(4)
+    assert a.snapshot()["states"] == b.snapshot()["states"]
+
+
+def test_five_states_present():
+    snap = IndustryBrain().snapshot()
+    assert len(snap["states"]) == 5
+    assert [s["key"] for s in snap["states"]] == list(domains.ORDER)
+    assert len(snap["link_rules"]) == len(LINK_RULES)
+
+
+def test_cross_domain_links_fire():
+    snap = IndustryBrain().run(3)
+    links = [e for e in snap["log"] if e["event"] == "link"]
+    assert links, "推演后应产生跨域联动日志"
+    # 联动必须跨越不同业务域
+    assert any(e["src"] != e["dst"] for e in links)
+
+
+def test_kpis_stay_bounded():
+    """联动叠加后 KPI 必须收敛，不能无限增长。"""
+    snap = IndustryBrain().run(20)
+    for st in snap["states"]:
+        for kdef in st["kpi_defs"]:
+            v = st["kpis"][kdef["key"]]
+            base = kdef["base"]
+            assert base * 0.7 <= v <= base * 1.3
+
+
+def test_optimize_propagates():
+    brain = IndustryBrain()
+    result = brain.optimize("procurement", "purchase_cost_index", 80.0)
+    assert result["ok"] is True
+    assert result["before"] != result["after"]
+    assert any(e["event"] == "optimize" for e in result["snapshot"]["log"])
+    # 财务域应受到传导影响
+    finance = [s for s in result["snapshot"]["states"] if s["key"] == "finance"][0]
+    assert finance["last_impact"] or any(
+        e["event"] == "link" and e["dst"] == "finance"
+        for e in result["snapshot"]["log"]
+    )
+
+
+def test_optimize_unknown_kpi():
+    result = IndustryBrain().optimize("procurement", "not_a_kpi", 10)
+    assert result["ok"] is False
+
+
+def test_reset():
+    brain = IndustryBrain()
+    brain.run(5)
+    brain.reset()
+    snap = brain.snapshot()
+    assert snap["step"] == 0
+    assert snap["log"] == []
+
+
+# ---------------- 领域智能体 ----------------
+
+def test_five_advices_with_rule_basis():
+    orch = BrainOrchestrator(use_llm=False)
+    orch.brain.run(2)
+    advices = orch.advise_all()
+    assert len(advices) == 5
+    assert all(a["basis"] == "rule" for a in advices)
+    assert all(a["domain_name"] for a in advices)
+
+
+def test_advice_snapshot_consistency():
+    orch = BrainOrchestrator(use_llm=False)
+    orch.advise_all()
+    snap = orch.snapshot()
+    assert len(snap["advices"]) == 5
+
+
+# ---------------- Web 层 ----------------
+
+def test_api_brain_endpoints():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from app.server import app
+
+    client = TestClient(app)
+    r = client.get("/api/brain/state")
+    assert r.status_code == 200
+    assert len(r.json()["states"]) == 5
+
+    r = client.post("/api/brain/run", json={"steps": 3})
+    assert r.status_code == 200
+    assert r.json()["step"] == 3
+
+    r = client.post("/api/brain/advise")
+    assert r.status_code == 200
+    assert len(r.json()["advices"]) == 5
+
+    r = client.post("/api/brain/optimize", json={
+        "domain": "procurement", "kpi": "purchase_cost_index", "target": 82.0,
+    })
+    assert r.status_code == 200 and r.json()["ok"] is True
+
+    r = client.post("/api/brain/reset")
+    assert r.status_code == 200
+    assert r.json()["step"] == 0
+```
+
+### `tests/test_carbon.py`（204 行）
+
+```python
+"""碳核算 Agent 测试：国标公式可手算复核。
+
+核心层：排放因子、五类排放源、总量汇总、情景模拟、回收桥接；
+Web 层：/api/carbon/* 接口。
+"""
+
+import pytest
+
+from paper_recycle_agent.carbon import factors, model, recycle_agent
+from paper_recycle_agent.carbon.accounting import CarbonAccounting
+from paper_recycle_agent.carbon.model import ActivityData, FuelUse
+
+
+# ---------------- 因子（国标附录B） ----------------
+
+def test_fuel_ef_formula():
+    """EF = CC × OF × 44/12（国标公式4），必须能手算复核。"""
+    f = factors.fuel("bituminous")
+    expected = 26.1e-3 * 0.93 * 44.0 / 12.0
+    assert abs(f.ef - expected) < 1e-12
+    assert abs(f.ef - 0.089001) < 1e-5
+
+
+def test_fuel_factors_have_sources():
+    for key in factors.FUELS:
+        f = factors.fuel(key)
+        p = f.public()
+        assert p["source"] == factors.SOURCE_STD
+        assert p["ncv_source"] and p["cc_source"]
+        assert p["ef"] > 0
+
+
+def test_unknown_fuel():
+    with pytest.raises(ValueError):
+        factors.fuel("no_such_fuel")
+
+
+def test_std_constants():
+    assert factors.LIMESTONE_EF == 0.405
+    assert factors.HEAT_EF_DEFAULT == 0.11
+    assert factors.CH4_MAX == 0.25 and factors.CH4_CORRECTION == 0.5
+    # 电力因子国标要求主管部门最新值，不内置过期数字
+    assert factors.ELECTRIC_EF_DEFAULT is None
+
+
+# ---------------- 核算公式 ----------------
+
+def _minimal() -> ActivityData:
+    """手算可复核的最小案例。"""
+    return ActivityData(
+        fuels=[FuelUse("bituminous", 1000.0)],  # 烟煤 1000 t
+        limestone_ton=1000.0,                    # 石灰石 1000 t
+        electricity_purchased=0.0,
+        electric_ef=None,
+        heat_purchased=1000.0,                   # 外购热 1000 GJ
+        wastewater_cod_removed=0.0,
+        paper_output_wan_ton=1.0,
+    )
+
+
+def test_fuel_emission_hand_calculable():
+    r = CarbonAccounting(_minimal()).calculate()
+    fuel_item = [i for i in r["items"] if i["key"] == "fuel_bituminous"][0]
+    # 1000 t × 19.570 GJ/t × 0.089001 tCO2/GJ = 1741.75 tCO2
+    assert fuel_item["activity"] == 19570.0
+    assert abs(fuel_item["emission"] - 1741.75) < 0.02
+
+
+def test_process_emission():
+    r = CarbonAccounting(_minimal()).calculate()
+    proc = [i for i in r["items"] if i["key"] == "process"][0]
+    assert abs(proc["emission"] - 405.0) < 1e-9  # 1000 × 0.405
+
+
+def test_heat_emission():
+    r = CarbonAccounting(_minimal()).calculate()
+    heat = [i for i in r["items"] if i["key"] == "heat"][0]
+    assert abs(heat["emission"] - 110.0) < 1e-9  # 1000 × 0.11
+
+
+def test_incomplete_when_electric_not_configured():
+    r = CarbonAccounting(_minimal()).calculate()
+    assert r["incomplete"] is True
+    assert r["total_tco2e"] is None
+    elec = [i for i in r["items"] if i["key"] == "electricity"][0]
+    assert elec["emission"] is None
+
+
+def test_total_matches_hand_calculation():
+    a = _minimal()
+    a.electric_ef = 0.5  # 购入电 0，因子不影响
+    r = CarbonAccounting(a).calculate()
+    # 1741.75 + 405 + 0 + 0 + 110 = 2256.75
+    assert abs(r["total_tco2e"] - 2256.75) < 0.02
+    assert r["incomplete"] is False
+
+
+def test_intensity_unit_correct():
+    """碳强度 = 总排放 ÷ (产量万吨 × 10000)，单位 tCO2e/吨纸。"""
+    a = _minimal()
+    a.electric_ef = 0.5
+    r = CarbonAccounting(a).calculate()
+    assert r["intensity_unit"] == "tCO2e/吨纸"
+    expected = round(r["total_tco2e"] / (1.0 * 10000.0), 4)
+    assert r["intensity_tco2e_per_ton"] == expected
+
+
+def test_wastewater_methane_formula():
+    a = ActivityData(
+        wastewater_cod_removed=1000.0, wastewater_cod_sludge=200.0,
+        methane_recovered=0.0, electric_ef=0.5,
+    )
+    r = CarbonAccounting(a).calculate()
+    ww = [i for i in r["items"] if i["key"] == "wastewater"][0]
+    # (1000-200) × 0.25 × 0.5 × 21 = 2100
+    assert abs(ww["emission"] - 2100.0) < 1e-9
+
+
+def test_exported_electricity_reduces():
+    base = ActivityData(electricity_purchased=1000.0, electric_ef=0.5)
+    exported = ActivityData(electricity_purchased=1000.0,
+                            electricity_exported=400.0, electric_ef=0.5)
+    e1 = [i for i in CarbonAccounting(base).calculate()["items"] if i["key"] == "electricity"][0]
+    e2 = [i for i in CarbonAccounting(exported).calculate()["items"] if i["key"] == "electricity"][0]
+    assert e1["activity"] == 1000.0 and e2["activity"] == 600.0
+    assert e2["emission"] < e1["emission"]
+
+
+# ---------------- 情景与回收桥接 ----------------
+
+def test_scenario_reduces_emission():
+    a = CarbonAccounting().activity
+    a.electric_ef = 0.5366
+    s = CarbonAccounting(a).scenario({"fuel:bituminous": 16000.0})
+    assert s["delta_tco2e"] < 0
+    assert "下降" in s["interpretation"]
+
+
+def test_recycle_credit_is_separate():
+    r = CarbonAccounting().calculate()
+    c = r["recycle_credit"]
+    assert "范围三" in c["scope"]
+    assert c["credit_tco2e"] > 0
+    assert "演示" in c["source"]
+
+
+def test_bridge_does_not_overwrite_factory_value():
+    a = CarbonAccounting().activity  # 已有 18 万吨
+    result = recycle_agent.bridge_to_activity(6971.0, a, overwrite=False)
+    assert result["written"] is False
+    assert a.wastepaper_recycled_wan_ton == 18.0
+
+
+def test_bridge_writes_when_empty():
+    a = ActivityData(wastepaper_recycled_wan_ton=0.0)
+    result = recycle_agent.bridge_to_activity(123.0, a, overwrite=False)
+    assert result["written"] is True
+    assert a.wastepaper_recycled_wan_ton == 123.0
+
+
+def test_eeioa_method_no_data():
+    result = recycle_agent.supply_chain_carbon_demo()
+    assert result["ok"] is False and result["available"] is False
+    assert "I−A" in result["formula"]
+
+
+def test_eeioa_method_with_matrix():
+    matrix = [[0.1, 0.2], [0.3, 0.1]]
+    result = recycle_agent.supply_chain_carbon_demo(matrix)
+    assert result["ok"] is True
+    assert len(result["leontief_inverse"]) == 2
+
+
+# ---------------- Web 层 ----------------
+
+def test_api_carbon_endpoints():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from app.server import app
+
+    client = TestClient(app)
+    r = client.get("/api/carbon/factors")
+    assert r.status_code == 200
+    assert len(r.json()["fuels"]) == len(factors.FUELS)
+
+    r = client.get("/api/carbon/state")
+    assert r.status_code == 200
+    assert len(r.json()["result"]["items"]) == 7
+
+    r = client.post("/api/carbon/activity", json={"electric_ef": 0.5366,
+                                                   "electric_ef_year": 2024})
+    assert r.status_code == 200
+    assert r.json()["result"]["incomplete"] is False
+
+    r = client.post("/api/carbon/scenario", json={"changes": {"fuel:bituminous": 16000.0}})
+    assert r.status_code == 200
+    assert r.json()["delta_tco2e"] < 0
+
+    r = client.post("/api/carbon/bridge-recycle?year=2024")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["bridge"]["written"] is False  # 不覆盖单厂数据
+
+    r = client.post("/api/carbon/reset")
+    assert r.status_code == 200 and r.json()["ok"] is True
 ```
 
 ### `tests/test_classifier.py`（29 行）
@@ -6197,6 +9618,191 @@ def test_system_prompt_forbids_fabrication():
     assert "不要编造" in llm.DEFAULT_SYSTEM_PROMPT
 ```
 
+### `tests/test_mill.py`（180 行）
+
+```python
+"""智能工厂多智能体仿真测试。
+
+分两层：
+1. 核心层（无第三方依赖）：工序、仿真状态机、设备调度、多智能体决策；
+2. Web 层：FastAPI 接口（缺 fastapi 时自动跳过，不影响核心测试）。
+"""
+
+import pytest
+
+from paper_recycle_agent.mill.agents import Orchestrator
+from paper_recycle_agent.mill import processes
+from paper_recycle_agent.mill.devices import DeviceFleet, Task
+from paper_recycle_agent.mill.simulation import MillSimulation, StageState
+
+
+# ---------------- 工序定义 ----------------
+
+def test_process_order_and_metrics():
+    assert processes.ORDER == ("pulping", "papermaking", "drying", "quality")
+    for key in processes.ORDER:
+        proc = processes.get(key)
+        assert proc.metrics
+        assert proc.devices
+        assert proc.knowledge
+
+
+def test_unknown_process_raises():
+    with pytest.raises(ValueError):
+        processes.get("not_exist")
+
+
+def test_metric_status():
+    m = processes.Metric("t", "温度", "°C", 10, 20)
+    assert m.status(15) == "normal"
+    assert m.status(12) == "normal"
+    assert m.status(20.5) == "warn"
+    assert m.status(30) == "critical"
+
+
+# ---------------- 仿真引擎 ----------------
+
+def test_simulation_is_deterministic():
+    a = MillSimulation(seed=42)
+    b = MillSimulation(seed=42)
+    a.start_batch("B1"); b.start_batch("B1")
+    for _ in range(6):
+        a.advance(); b.advance()
+    assert a.snapshot()["stages"] == b.snapshot()["stages"]
+
+
+def test_stage_transition():
+    sim = MillSimulation(seed=1)
+    sim.start_batch("B1")
+    assert sim.stages["pulping"].state == "running"
+    assert sim.stages["papermaking"].state == "idle"
+    assert sim.next_process("pulping") == "papermaking"
+    assert sim.next_process("quality") is None
+
+
+def test_finish_and_flow():
+    sim = MillSimulation(seed=2)
+    sim.start_batch("B1")
+    for _ in range(processes.get("pulping").base_time):
+        sim.advance()
+    assert "pulping" in sim.finish_completed()
+    assert sim.stages["pulping"].state == "done"
+
+
+def test_anomaly_injection_and_clear():
+    sim = MillSimulation(seed=3)
+    sim.start_batch("B1")
+    assert sim.inject_anomaly("pulping", "brightness", 30.0) is True
+    assert sim.stages["pulping"].metrics["brightness"] == 30.0
+    assert sim.stages["pulping"].metric_status["brightness"] == "critical"
+    assert sim.inject_anomaly("pulping", "no_such_metric", 1) is False
+    sim.clear_anomalies()
+    assert sim.snapshot()["anomalies"] == []
+
+
+def test_hold_and_resume():
+    sim = MillSimulation(seed=4)
+    sim.start_batch("B1")
+    sim.hold_batch("pulping")
+    assert sim.stages["pulping"].state == "held"
+    sim.resume("pulping")
+    assert sim.stages["pulping"].state == "running"
+
+
+def test_stage_overall_status():
+    st = StageState(key="pulping", metric_status={"a": "normal", "b": "warn"})
+    assert st.overall_status == "warn"
+    st.metric_status["a"] = "critical"
+    assert st.overall_status == "critical"
+
+
+# ---------------- 设备层 ----------------
+
+def test_device_assign_and_tick():
+    fleet = DeviceFleet()
+    sent = fleet.dispatch_for("pulping", "start", "T001")
+    assert "agv-01" in sent and "plc-pulp" in sent
+    results = []
+    for _ in range(5):
+        results.extend(fleet.tick(step=1))
+    assert any(r.device_id == "agv-01" for r in results)
+    assert any(r.device_id == "plc-pulp" for r in results)
+
+
+def test_device_queue_when_busy():
+    fleet = DeviceFleet()
+    d = fleet.devices["agv-01"]
+    assert d.assign(Task("t1", "pulping", "start")) is True
+    assert d.assign(Task("t2", "pulping", "start")) is False
+    assert d.snapshot()["queue_len"] == 1
+
+
+def test_unknown_device():
+    assert DeviceFleet().assign("no-such-device", Task("t", "pulping", "a")) is False
+
+
+# ---------------- 多智能体 ----------------
+
+def test_orchestrator_runs_full_batch():
+    orch = Orchestrator(use_llm=False)
+    orch.start_batch()
+    snap = orch.run_until_idle(max_steps=80)
+    assert snap["sim"]["idle"] is True
+    states = [s["state"] for s in snap["sim"]["stages"]]
+    assert states == ["done"] * 4
+    assert len(snap["decisions"]) == 4
+    assert any(e["event"] == "batch_complete" for e in snap["log"])
+    # 七台设备都至少干过一次活
+    assert all(d["done_count"] > 0 for d in snap["devices"])
+
+
+def test_orchestrator_anomaly_triggers_arbitration():
+    orch = Orchestrator(use_llm=False)
+    orch.start_batch()
+    orch.sim.inject_anomaly("pulping", "brightness", 20.0)
+    snap = orch.run_until_idle(max_steps=80)
+    held = [s for s in snap["sim"]["stages"] if s["state"] == "held"]
+    assert any(s["key"] == "pulping" for s in held)
+    assert any(e["event"] == "arbitration" for e in snap["log"])
+
+
+def test_decision_basis_is_rule_without_llm():
+    orch = Orchestrator(use_llm=False)
+    orch.start_batch()
+    snap = orch.run_until_idle(max_steps=80)
+    assert all(d["basis"] == "rule" for d in snap["decisions"])
+
+
+# ---------------- Web 层 ----------------
+
+def test_api_mill_endpoints():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from app.server import app
+
+    client = TestClient(app)
+    r = client.get("/api/mill/processes")
+    assert r.status_code == 200
+    assert r.json()["order"] == list(processes.ORDER)
+
+    r = client.post("/api/mill/start")
+    assert r.status_code == 200
+    assert r.json()["sim"]["batch"]
+
+    r = client.post("/api/mill/run")
+    assert r.status_code == 200
+    assert r.json()["sim"]["idle"] is True
+
+    r = client.post("/api/mill/anomaly", json={
+        "process": "drying", "metric": "moisture", "value": 20.0,
+    })
+    assert r.status_code == 200 and r.json()["ok"] is True
+
+    r = client.post("/api/mill/reset")
+    assert r.status_code == 200
+    assert r.json()["sim"]["batch"] is None
+```
+
 ### `tests/test_pricing.py`（23 行）
 
 ```python
@@ -6580,8 +10186,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.6.6"
-description = "废纸回收 Agent 对话助手：分类、估价、区域/历年/分类/企业统计（核心逻辑纯标准库）"
+version = "1.9.0"
+description = "造纸工厂多智能体 · 碳核算 Agent：国标方法核算工厂排放，含废纸回收子 Agent、工艺智能体、产业大脑（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
 requires-python = ">=3.7"
@@ -9276,4 +12882,4 @@ dim "    bash tools/publish_to_github.sh --apply"
 
 ---
 
-共收录 49 个文件。
+共收录 66 个文件。

@@ -1,12 +1,19 @@
-# 废纸回收 Agent 对话助手
+# 造纸工厂多智能体 · 碳核算 Agent
 
 ![CI](https://github.com/lanlanyuan/paper-recycle-agent/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.7-3776ab)
-![Tests](https://img.shields.io/badge/tests-216%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-235%20passed-brightgreen)
 ![Deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 
-一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
+一个从废纸回收助手成长而来的**造纸工厂多智能体系统**，核心是**碳核算 Agent**：
+按国标《温室气体排放核算与报告要求 造纸和纸制品生产企业》的方法核算工厂温室气体排放，
+排放因子取自国标附录B（逐条带出处），活动数据为示例工厂仿真输入。
+
+**v1.9.0 定位重构**：废纸回收助手保留全部能力，降级为工厂内的「废纸回收子 Agent」，
+其回收量喂给碳核算做范围三减排演示；原投入产出表的方法论（直接消耗系数/Leontief 逆）
+抽出来作为供应链碳足迹（EEIOA）的参考；智能工厂（工艺智能体）与产业大脑（五链贯通）
+作为工厂的车间层与经营层并存。详见 [docs/CARBON_AGENT.md](docs/CARBON_AGENT.md)。
 
 **v1.7.0 新增「智能工厂」**：把造纸流程拆成制浆 / 抄纸 / 干燥 / 质检四道工序，每道工序由一个子智能体负责，总调度器编排任务、派机器狗与 AGV 作业，支持异常注入与处置链演示。这是**仿真演示，不连接任何真实产线**——详见 [docs/MILL_AGENTS.md](docs/MILL_AGENTS.md)。
 
@@ -17,7 +24,7 @@
 | 方式 | 怎么用 | 需要什么 | 能力 |
 | --- | --- | --- | --- |
 | **① 离线单文件**（最稳） | 双击 `dist/paper-recycle-offline.html` | 只要浏览器 | 对话、五个标签页（含投入产出）、CSV 导出 |
-| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能：七张表 xlsx、消耗地图、模型配置、麦克风自检 |
+| **② 本地服务** | 双击 `启动本地版.bat`，浏览器打开 `http://localhost:8000` | Python 3.8+ | 全部功能：十个标签页（碳核算为首页）、七张表 xlsx、模型配置、麦克风自检 |
 | **③ 自行部署**（可选） | `uvicorn app.server:app` 后挂到任意容器 / 平台 | Python 3.8+ | 同 ② |
 
 > 打不开线上链接时，先用 ① —— 它是单个 HTML 文件，数据全部内联，不联网、不起服务、双击即开。
@@ -41,9 +48,10 @@
 python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 3.8/3.9 专有 API
 ```
 
-## 这个 Agent 解决什么问题
+## 废纸回收子 Agent 解决什么问题
 
-很多人第一反应是「给统计局做报表」。其实它覆盖四类角色、六个真实问题：
+系统核心已是碳核算 Agent；下面这段讲的是作为工厂子 Agent 的废纸回收助手，
+它覆盖四类角色、六个真实问题（其回收量同时喂给碳核算做范围三减排演示）：
 
 | 角色 | 他们要回答的问题 | 本工具对应的能力 |
 | --- | --- | --- |
@@ -66,6 +74,14 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 - 产废单位：语音问「纸箱 20 斤能卖多少」，或问「涉密文件怎么处理」
 
 ## 特性
+
+**核心 · 碳核算 Agent**（v1.9.0，详见 [docs/CARBON_AGENT.md](docs/CARBON_AGENT.md)）：
+- **国标方法核算**：按《温室气体排放核算与报告要求 造纸和纸制品生产企业》核算五类排放源（燃料燃烧 / 过程 / 废水甲烷 / 购入电力 / 购入热力），公式逐条可手算复核
+- **排放因子带出处**：因子取自国标附录B，逐条标注来源；电力因子不内置过期值，由用户填当年主管部门数据
+- **口径纪律**：活动数据为示例工厂仿真输入；范围三（废纸回收减排）单列不并入国标边界；投入产出法仅作 EEIOA 方法参考、无数据不推算
+- **情景模拟 + 输入可改**：界面改活动数据即时重算，支持减排情景对比
+
+**工厂子 Agent · 废纸回收助手**（原项目主角，保留全功能）：
 - 9 类废纸知识库（可回收 / 不可回收及缘由）
 - 关键词分类引擎，多命中智能排序
 - 重量 × 单价回收估价，支持「斤」折算
@@ -84,7 +100,7 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 - **对话支持语音输入**（浏览器 Web Speech API，失败时在输入框下方显示具体原因）
 - **智能工厂多智能体仿真**（v1.7.0）：四道工序子智能体 + 总调度器 + AGV/机器狗/PLC 模拟，异常注入演示处置链，决策标注 rule/llm 来源；详见 [docs/MILL_AGENTS.md](docs/MILL_AGENTS.md)
 - **产业大脑五链贯通仿真**（v1.8.0）：采购/生产/销售/物流/财务五域智能体 + 共享数据底座 + 12 条跨域联动 + 管理干预推演；对标来源与仿真边界见 [docs/INDUSTRY_BRAIN.md](docs/INDUSTRY_BRAIN.md)
-- **Web 图形界面**：FastAPI 聊天页 + 七个标签页（区域 / 历年 / 分类 / 企业 / 投入产出 / 消耗地图 / 设置）
+- **Web 图形界面**：FastAPI 聊天页 + 十个标签页（碳核算 / 区域 / 历年 / 分类 / 企业 / 投入产出 / 智能工厂 / 产业大脑 / 消耗地图 / 设置），碳核算为默认首页
 - **核心零依赖、Python 3.7 起可用**；openpyxl 为可选依赖，缺失时导出接口返回 503 并给出安装提示
 - GitHub Actions 多版本 CI（3.8 / 3.11 / 3.13 跑全量，3.7 跑零依赖核心）
 
@@ -176,6 +192,13 @@ uvicorn app.server:app --reload    # 浏览器打开 http://localhost:8000
 ```
 paper-recycle-agent/
 ├── src/paper_recycle_agent/       核心包（业务逻辑纯标准库）
+│   ├── carbon/                    【核心】工厂碳核算 Agent（国标方法，五类排放源）
+│   │   ├── factors.py             国标附录B排放因子（逐条带出处）+ 公式常量
+│   │   ├── model.py               活动数据模型 + 示例工厂仿真输入
+│   │   ├── accounting.py          核算引擎：燃烧/过程/废水/电力/热力 + 情景模拟
+│   │   └── recycle_agent.py       废纸回收桥接 + EEIOA 供应链碳足迹方法参考
+│   ├── mill/                      造纸工艺四工序多智能体（车间层）
+│   ├── brain/                     产业大脑五链贯通（经营管理层）
 │   ├── knowledge.py               知识库（9 类实用回收指引 + 参考价）
 │   ├── data.py                    年鉴/行业数据（GB/T 20811-2018 + 2024 报告）
 │   ├── stats.py                   历年序列 + 八大类占比与分类回收量
@@ -188,9 +211,9 @@ paper-recycle-agent/
 │   ├── pricing.py                 估价
 │   ├── agent.py                   对话引擎
 │   └── cli.py                     命令行
-├── app/server.py                  FastAPI 服务（界面 + 统计接口 + 导出 + 模型代理）
-├── app/static/index.html          界面（七个标签页）
-├── tests/                         pytest 单元测试（169 项）
+├── app/server.py                  FastAPI 服务（界面 + 碳核算/统计接口 + 导出 + 模型代理）
+├── app/static/index.html          界面（十个标签页，碳核算为默认首页）
+├── tests/                         pytest 单元测试（235 项）
 ├── tools/                         代码清单 / 离线版构建 / 3.7 兼容校验 / 历史自洽校验
 ├── config/llm.json.example        模型配置模板（复制为 llm.json，已被 gitignore）
 ├── data/enterprises.csv.example   企业名录模板
@@ -204,15 +227,15 @@ paper-recycle-agent/
 ## 代码规模：有效代码 LOC
 
 不按「文件多少行」报数，按**有效代码行**算——空行、注释、文档字符串、
-内嵌模板全部剔除。数字截至 v1.6.6：
+内嵌模板全部剔除。数字截至 v1.9.0（碳核算 Agent 重构后）：
 
 | 层级 | 文件数 | 物理行 | 有效代码行 |
 | --- | ---: | ---: | ---: |
-| 核心领域逻辑（`src/paper_recycle_agent/`） | 13 | 2741 | 2043 |
-| Web 层（`app/` + `run.py`） | 3 | 1952 | 1680 |
-| 测试（`tests/` + `conftest.py`） | 14 | 1490 | 969 |
-| 工具脚本（`tools/`） | 6 | 1726 | 790 |
-| **合计** | **36** | **7909** | **5482** |
+| 核心领域逻辑（`src/paper_recycle_agent/`） | 22 | 4026 | 2990 |
+| Web 层（`app/` + `run.py`） | 3 | 2942 | 2497 |
+| 测试（`tests/` + `conftest.py`） | 17 | 2033 | 1326 |
+| 工具脚本（`tools/`） | 7 | 2332 | 1235 |
+| **合计** | **49** | **11333** | **8048** |
 
 三类内容明确**不计入**，理由写清楚而不是悄悄略过：
 
@@ -395,6 +418,9 @@ bash tools/publish_to_github.sh --apply  # 真的创建
 任何 Issue/PR 时跑**——Issue 编号是仓库级序列，与 PR 共享，一旦有别的对象占号就对不上了。
 
 ## 文档
+- [碳核算 Agent：国标依据与架构](docs/CARBON_AGENT.md)　←　v1.9.0 核心，公式/因子逐条带出处
+- [智能工厂多智能体](docs/MILL_AGENTS.md)
+- [产业大脑五链贯通](docs/INDUSTRY_BRAIN.md)
 - [使用说明](docs/USAGE.md)
 - [上传到 GitHub（手把手）](docs/UPLOAD_TO_GITHUB.md)　←　含 7 种常见报错的处理方法
 - [贡献指南](docs/CONTRIBUTING.md)

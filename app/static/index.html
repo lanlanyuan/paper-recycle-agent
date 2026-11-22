@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>废纸回收 Agent 对话助手</title>
+<title>造纸工厂多智能体 · 碳核算 Agent</title>
 <style>
   :root {
     --bg: #f5f7fa; --panel: #ffffff; --ink: #1f2329; --muted: #6b7280;
@@ -233,12 +233,43 @@
        border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
   .opt-form button { height: 27px; border-radius: 6px; border: 1px solid var(--brand);
        background: var(--brand); color: #fff; font-size: 11px; cursor: pointer; }
+
+  /* ---------- 碳核算 Agent（核心） ---------- */
+  .carbon-hero { border: 1px solid #e8b4b4; border-radius: 11px; padding: 11px 13px;
+                 background: #fef6f6; margin-bottom: 10px; }
+  .carbon-hero .ch-title { font-size: 12px; color: #8a4a4a; }
+  .carbon-hero .ch-total { font-size: 27px; font-weight: 700; color: #a32d2d;
+                           font-variant-numeric: tabular-nums; margin: 3px 0; }
+  .carbon-hero .ch-total .u { font-size: 13px; font-weight: 400; }
+  .carbon-hero .ch-meta { font-size: 11px; color: #8a6d1f; line-height: 1.5; }
+  .carbon-warn { background: var(--warn-bg); border: 1px solid var(--warn-line);
+                 color: var(--warn-ink); border-radius: 8px; padding: 7px 10px;
+                 font-size: 11px; line-height: 1.5; margin-bottom: 9px; }
+  .carbon-bar { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
+  .carbon-bar .cb-lbl { width: 88px; color: var(--muted); flex-shrink: 0; }
+  .carbon-bar .cb-track { flex: 1; height: 13px; background: #eef1f4; border-radius: 3px; overflow: hidden; }
+  .carbon-bar .cb-fill { height: 100%; background: #c06565; border-radius: 3px; }
+  .carbon-bar .cb-val { width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+  .carbon-item { border-bottom: 1px dashed var(--border); padding: 5px 0; font-size: 10.5px; }
+  .carbon-item:last-child { border-bottom: none; }
+  .carbon-item .ci-h { display: flex; justify-content: space-between; gap: 5px; }
+  .carbon-item .ci-h b { font-size: 11.5px; }
+  .carbon-item .ci-formula { color: var(--muted); margin-top: 2px; font-size: 10px; line-height: 1.4; }
+  .carbon-item .ci-src { color: #6b7a9c; font-size: 9.5px; margin-top: 1px; }
+  .carbon-input { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .carbon-input label { font-size: 10.5px; color: var(--muted); display: grid; gap: 2px; }
+  .carbon-input input { height: 26px; border: 1px solid var(--border); border-radius: 6px;
+                        padding: 0 6px; font-size: 11.5px; color: var(--ink); width: 100%;
+                        box-sizing: border-box; }
+  .carbon-credit { background: #eaf3de; border: 1px solid #c0dd97; border-radius: 9px;
+                   padding: 8px 10px; font-size: 11px; line-height: 1.5; }
+  .carbon-credit .v { font-size: 17px; font-weight: 700; color: #3b6d11; }
   @media (max-width: 980px) { .side { display: none; } }
 </style>
 </head>
 <body>
-<header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.8.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 智能工厂 · 产业大脑 · 地图 · 语音</span>
+<header>🪨 造纸工厂多智能体 · 碳核算 Agent
+  <span class="sub">v1.9.0 · 碳核算(核心) · 废纸回收Agent · 智能工厂 · 产业大脑 · 区域/历年/分类统计</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -255,7 +286,8 @@
 
   <aside class="side">
     <div class="tabs">
-      <div class="tab active" data-pane="region" onclick="switchTab('region')">区域统计</div>
+      <div class="tab active" data-pane="carbon" onclick="switchTab('carbon')">碳核算Agent</div>
+      <div class="tab" data-pane="region" onclick="switchTab('region')">区域统计</div>
       <div class="tab" data-pane="history" onclick="switchTab('history')">历年数据</div>
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
@@ -266,8 +298,49 @@
       <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
 
+    <!-- 碳核算 Agent（核心） -->
+    <section class="pane active" id="pane-carbon">
+      <div class="notice">
+        工厂碳核算 Agent · 按国标《温室气体排放核算与报告要求 造纸和纸制品生产企业》方法。
+        排放因子取国标附录B缺省值（逐项可查出处）；活动数据为<b>示例工厂仿真输入，非真实工厂</b>。
+      </div>
+      <div class="mill-ctrl">
+        <button id="carbonResetBtn" onclick="carbonReset()">恢复示例数据</button>
+        <button class="ghost" id="carbonBridgeBtn" onclick="carbonBridge()">取回收量做原料输入</button>
+      </div>
+
+      <div class="carbon-hero" id="carbonHero"></div>
+      <div class="carbon-warn" id="carbonWarn"></div>
+
+      <div class="sect-title"><span>排放结构（tCO₂e）</span><span class="hintline" id="carbonStructureHint"></span></div>
+      <div id="carbonBars"></div>
+
+      <div class="sect-title"><span>计算明细（公式与出处可查）</span></div>
+      <div class="scroll" style="max-height:230px" id="carbonItems"></div>
+
+      <div class="sect-title"><span>废纸回收 Agent 的减排贡献</span><span class="hintline">范围三，不计入国标总量</span></div>
+      <div class="carbon-credit" id="carbonCredit"></div>
+
+      <div class="sect-title"><span>修改活动数据（改完自动重算）</span><span class="hintline">示例值，可手改验证公式</span></div>
+      <details>
+        <summary style="font-size:11.5px;color:var(--muted);cursor:pointer">展开输入项（煤量、电量、石灰石…）</summary>
+        <div class="carbon-input" id="carbonInputs" style="margin-top:8px"></div>
+        <div class="mill-ctrl" style="margin-top:8px">
+          <button id="carbonApplyBtn" onclick="carbonApply()">应用并重算</button>
+        </div>
+      </details>
+
+      <div class="sect-title"><span>情景模拟</span><span class="hintline">改一个量，看排放变化</span></div>
+      <div class="anomaly-form">
+        <select id="scenField"></select>
+        <input id="scenValue" type="number" step="1" value="0" />
+        <button onclick="carbonScenario()">模拟</button>
+      </div>
+      <div class="mill-status" id="scenResult"></div>
+    </section>
+
     <!-- 区域统计 -->
-    <section class="pane active" id="pane-region">
+    <section class="pane" id="pane-region">
       <div class="crumb" id="crumb"></div>
       <div class="summary" id="summary"></div>
       <div class="notice">
@@ -662,6 +735,7 @@
     document.querySelectorAll(".pane").forEach(p => {
       p.classList.toggle("active", p.id === "pane-" + name);
     });
+    if (name === "carbon") loadCarbon();
     if (name === "enterprise") loadEnterprises();
     if (name === "io") loadIO(state.year);
     if (name === "map") loadMap(state.year);
@@ -1664,11 +1738,11 @@
     }
   };
 
-  addMsg("你好，我是废纸回收助手 🪨\n" +
-         "可以问我：某个废纸能不能回收、估算值多少钱、全国/某省回收量、历年趋势、八大类分类回收量、某省有哪些回收企业。\n" +
-         "右侧四个标签页：区域统计 / 历年数据 / 分类结构 / 企业分布，都可导出 Excel。\n" +
+  addMsg("你好，我是造纸工厂智能体助手 🪨\n" +
+         "核心能力：碳核算 Agent（国标方法，五大排放源）。废纸回收助手已作为工厂内的子 Agent 接入，为碳核算提供原料回收数据。\n" +
+         "可以问我：废纸能不能回收、值多少钱、回收量、消耗金额；也可在右侧「碳核算Agent」里核算工厂排放。\n" +
          "语音输入若不可用，页面输入框下方会直接告诉你原因。", "bot");
-  loadStats("CN", 2024);
+  loadCarbon();
   loadInfo();
 
   /* ---------------- 智能工厂（多智能体仿真） ---------------- */
@@ -1957,6 +2031,181 @@
         body:JSON.stringify({domain:domain, kpi:kpi, target:target})});
       const data = await res.json();
       if (data.ok) renderBrain(data.snapshot);
+    } catch (e) {}
+  }
+
+  /* ---------------- 碳核算 Agent（核心） ---------------- */
+  const CARBON_LABEL = {
+    fuel:"化石燃料燃烧", process:"过程排放(石灰石)",
+    wastewater:"废水厌氧甲烷", electricity:"净购入电力", heat:"净购入热力"
+  };
+  let carbonFactorsCache = null;
+
+  async function loadCarbon() {
+    if (!carbonFactorsCache) {
+      try { carbonFactorsCache = await (await fetch("/api/carbon/factors")).json(); }
+      catch (e) {}
+    }
+    await carbonRefresh();
+  }
+
+  async function carbonRefresh() {
+    try {
+      const data = await (await fetch("/api/carbon/state")).json();
+      renderCarbon(data);
+      buildCarbonInputs(data.activity);
+      buildScenarioSelect(data.activity);
+    } catch (e) {}
+  }
+
+  function renderCarbon(data) {
+    const r = data.result;
+    const hero = document.getElementById("carbonHero");
+    if (r.total_tco2e === null) {
+      hero.innerHTML = '<div class="ch-title">' + esc(r.factory) + ' · ' + r.year + ' 年温室气体排放量</div>' +
+        '<div class="ch-total" style="color:var(--muted)">待配置电力因子</div>' +
+        '<div class="ch-meta">填入主管部门最新电力排放因子后即可得出总量。</div>';
+    } else {
+      hero.innerHTML = '<div class="ch-title">' + esc(r.factory) + ' · ' + r.year + ' 年温室气体排放总量</div>' +
+        '<div class="ch-total">' + fmtNum(r.total_tco2e) + '<span class="u"> tCO₂e</span></div>' +
+        '<div class="ch-meta">单位产品碳强度：<b>' + r.intensity_tco2e_per_ton + '</b> ' +
+        esc(r.intensity_unit || 'tCO2e/吨纸') + '（产量 ' + r.output_wan_ton + ' 万吨）</div>';
+    }
+
+    const warn = document.getElementById("carbonWarn");
+    warn.innerHTML = r.incomplete
+      ? '⚠ 核算不完整：电力排放因子未配置。国标要求取主管部门最近年份公布值，填入后总量才有效。'
+      : '✓ 核算边界完整（国标五类排放源）。排放因子为国标附录B缺省值；活动数据为示例输入。';
+
+    const bars = document.getElementById("carbonBars");
+    bars.innerHTML = "";
+    const bySource = r.by_source || {};
+    const maxVal = Math.max(1, ...Object.values(bySource).filter(v => v !== null).map(v => Math.abs(v)));
+    Object.keys(CARBON_LABEL).forEach(k => {
+      const v = bySource[k];
+      const row = document.createElement("div");
+      row.className = "carbon-bar";
+      const pct = (v === null) ? 0 : Math.abs(v) / maxVal * 100;
+      row.innerHTML = '<span class="cb-lbl">' + CARBON_LABEL[k] + '</span>' +
+        '<span class="cb-track"><span class="cb-fill" style="width:' + pct.toFixed(1) + '%"></span></span>' +
+        '<span class="cb-val">' + (v === null ? "待配置" : fmtNum(v)) + '</span>';
+      bars.appendChild(row);
+    });
+    document.getElementById("carbonStructureHint").textContent = "合计 " +
+      (r.total_tco2e === null ? "—" : fmtNum(r.total_tco2e)) + " tCO₂e";
+
+    const items = document.getElementById("carbonItems");
+    items.innerHTML = "";
+    (r.items || []).forEach(it => {
+      const div = document.createElement("div");
+      div.className = "carbon-item";
+      div.innerHTML = '<div class="ci-h"><b>' + esc(it.name) + '</b><span>' +
+        (it.emission === null ? "待配置" : fmtNum(it.emission) + " tCO₂e") + '</span></div>' +
+        '<div class="ci-formula">活动 ' + fmtNum(it.activity) + ' ' + esc(it.activity_unit) +
+        ' × 因子 ' + (it.ef === null ? "—" : it.ef) + ' ' + esc(it.ef_unit) + '</div>' +
+        '<div class="ci-formula">' + esc(it.formula) + (it.detail ? ' ｜ ' + esc(it.detail) : '') + '</div>' +
+        '<div class="ci-src">来源：' + esc(it.source) + '</div>';
+      items.appendChild(div);
+    });
+
+    const c = r.recycle_credit || {};
+    document.getElementById("carbonCredit").innerHTML =
+      '废纸回收 Agent 提供回收量 <b>' + fmtNum(c.wastepaper_ton) + '</b> 吨，' +
+      '按演示系数 ' + c.coef + ' tCO₂e/t 折算减排 <span class="v">' + fmtNum(c.credit_tco2e) + '</span> tCO₂e。' +
+      '<div style="font-size:10px;color:var(--muted);margin-top:4px">' +
+      esc(c.scope) + ' ｜ ' + esc(c.note) + '<br>系数说明：' + esc(c.source) + '</div>';
+
+    document.getElementById("scenResult").textContent = "情景模拟结果将显示在这里。";
+  }
+
+  function fmtNum(v) {
+    if (v === null || v === undefined) return "—";
+    return Number(v).toLocaleString("zh-CN", {maximumFractionDigits:1});
+  }
+
+  function buildCarbonInputs(activity) {
+    const box = document.getElementById("carbonInputs");
+    if (!activity || box.dataset.built === activity.factory_name + activity.year) return;
+    const fields = [
+      ["烟煤(t)", "f FuelUse bituminous", (activity.fuels||[]).find(f=>f.key==='bituminous')?.quantity, "fuel:bituminous"],
+      ["天然气(万m³)", "fuel:natural_gas", (activity.fuels||[]).find(f=>f.key==='natural_gas')?.quantity, "fuel:natural_gas"],
+      ["石灰石(t)", "limestone_ton", activity.limestone_ton, "limestone_ton"],
+      ["外购电力(MWh)", "electricity_purchased", activity.electricity_purchased, "electricity_purchased"],
+      ["电力因子(tCO2/MWh)", "electric_ef", activity.electric_ef, "electric_ef"],
+      ["外购热力(GJ)", "heat_purchased", activity.heat_purchased, "heat_purchased"],
+      ["产量(万吨)", "paper_output_wan_ton", activity.paper_output_wan_ton, "paper_output_wan_ton"],
+      ["废纸回收(万吨)", "wastepaper_recycled_wan_ton", activity.wastepaper_recycled_wan_ton, "wastepaper_recycled_wan_ton"]
+    ];
+    box.innerHTML = "";
+    fields.forEach(f => {
+      const label = document.createElement("label");
+      label.innerHTML = '<span>' + f[0] + '</span><input type="number" step="any" data-cfield="' + f[3] + '" value="' + (f[2]===null||f[2]===undefined?'':f[2]) + '">';
+      box.appendChild(label);
+    });
+    box.dataset.built = activity.factory_name + activity.year;
+  }
+
+  function buildScenarioSelect(activity) {
+    const sel = document.getElementById("scenField");
+    if (!sel.options.length) {
+      [["fuel:bituminous","烟煤用量(t)"],["electricity_purchased","外购电力(MWh)"],
+       ["heat_purchased","外购热力(GJ)"],["limestone_ton","石灰石(t)"]].forEach(o => {
+        const op = document.createElement("option");
+        op.value = o[0]; op.textContent = o[1]; sel.appendChild(op);
+      });
+    }
+  }
+
+  async function carbonApply() {
+    const payload = {fuel_quantities:{}, electric_ef_year:2024};
+    document.querySelectorAll("#carbonInputs input[data-cfield]").forEach(inp => {
+      const key = inp.dataset.cfield, val = parseFloat(inp.value);
+      if (isNaN(val)) return;
+      if (key.indexOf("fuel:") === 0) payload.fuel_quantities[key.slice(5)] = val;
+      else payload[key] = val;
+    });
+    try {
+      const data = await (await fetch("/api/carbon/activity", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)})).json();
+      renderCarbon(data);
+    } catch (e) {}
+  }
+
+  async function carbonScenario() {
+    const field = document.getElementById("scenField").value;
+    const val = parseFloat(document.getElementById("scenValue").value);
+    if (isNaN(val)) return;
+    try {
+      const data = await (await fetch("/api/carbon/scenario", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({changes:{[field]:val}})})).json();
+      document.getElementById("scenResult").innerHTML =
+        '基准 <b>' + fmtNum(data.baseline.total_tco2e) + '</b> → 情景 <b>' +
+        fmtNum(data.scenario.total_tco2e) + '</b> tCO₂e；差额 <b>' +
+        fmtNum(data.delta_tco2e) + '</b> tCO₂e。' + esc(data.interpretation);
+    } catch (e) {}
+  }
+
+  async function carbonBridge() {
+    try {
+      const data = await (await fetch("/api/carbon/bridge-recycle?year=2024", {method:"POST"})).json();
+      if (data.ok) {
+        renderCarbon(data);
+        document.getElementById("carbonInputs").dataset.built = "";
+        buildCarbonInputs(data.activity);
+        if (data.bridge && data.bridge.hint) {
+          document.getElementById("scenResult").textContent = data.bridge.hint;
+        }
+      }
+    } catch (e) {}
+  }
+
+  async function carbonReset() {
+    try {
+      const data = await (await fetch("/api/carbon/reset", {method:"POST"})).json();
+      renderCarbon(data);
+      document.getElementById("carbonInputs").dataset.built = "";
+      buildCarbonInputs(data.activity);
     } catch (e) {}
   }
 </script>
