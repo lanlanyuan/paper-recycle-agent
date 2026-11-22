@@ -200,12 +200,45 @@
        border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
   .anomaly-form button { height: 27px; border-radius: 6px; border: 1px solid #e2c572;
        background: #fff; color: #8a6d1f; font-size: 11px; cursor: pointer; }
+
+  /* ---------- 产业大脑（五链贯通） ---------- */
+  .brain-chain { display: flex; align-items: center; gap: 3px; margin-bottom: 9px; flex-wrap: wrap; }
+  .brain-node { flex: 1; min-width: 58px; border: 1px solid var(--border); border-radius: 8px;
+                padding: 6px 4px; text-align: center; background: #fbfcfd; font-size: 11.5px; }
+  .brain-node .bn { font-weight: 600; }
+  .brain-node .bv { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .brain-arrow { color: var(--brand); font-size: 13px; }
+  .brain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .brain-card { border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px; background: #fff; }
+  .brain-card .bc-h { font-size: 12px; font-weight: 600; margin-bottom: 4px;
+                      display: flex; justify-content: space-between; gap: 5px; }
+  .brain-card .bc-h .tag { font-size: 9.5px; font-weight: 400; color: var(--brand);
+                           background: var(--brand-soft); border-radius: 8px; padding: 1px 6px; }
+  .brain-card .bc-sub { font-size: 10px; color: var(--muted); margin-bottom: 5px; }
+  .brain-kpi { display: flex; justify-content: space-between; font-size: 10.5px;
+               padding: 2px 0; border-bottom: 1px dashed var(--border); }
+  .brain-kpi:last-child { border-bottom: none; }
+  .brain-kpi .k { color: var(--muted); } .brain-kpi .v { font-variant-numeric: tabular-nums; }
+  .brain-impact { font-size: 9.5px; color: #8a6d1f; margin-top: 4px; line-height: 1.4; }
+  .brain-advice { border-left: 3px solid var(--brand-line); padding: 4px 8px; margin-bottom: 4px;
+                  background: #fbfcfd; font-size: 11px; line-height: 1.5; }
+  .brain-advice .bd { color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .bench-row { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px;
+               padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .bench-row:last-child { border-bottom: none; }
+  .bench-row .bv { color: var(--brand); font-weight: 600; white-space: nowrap; }
+  .bench-row .bs { color: var(--muted); font-size: 9.5px; }
+  .opt-form { display: grid; grid-template-columns: 1fr 1fr 62px; gap: 5px; margin-bottom: 6px; }
+  .opt-form select, .opt-form input { height: 27px; border: 1px solid var(--border);
+       border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
+  .opt-form button { height: 27px; border-radius: 6px; border: 1px solid var(--brand);
+       background: var(--brand); color: #fff; font-size: 11px; cursor: pointer; }
   @media (max-width: 980px) { .side { display: none; } }
 </style>
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.7.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 智能工厂 · 消耗地图 · 语音</span>
+  <span class="sub">v1.8.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 智能工厂 · 产业大脑 · 地图 · 语音</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -228,6 +261,7 @@
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
       <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
       <div class="tab" data-pane="mill" onclick="switchTab('mill')">智能工厂</div>
+      <div class="tab" data-pane="brain" onclick="switchTab('brain')">产业大脑</div>
       <div class="tab" data-pane="map" onclick="switchTab('map')">消耗地图</div>
       <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
@@ -451,6 +485,44 @@
       <div class="mill-log" id="millLog"></div>
     </section>
 
+    <!-- 产业大脑（五链贯通） -->
+    <section class="pane" id="pane-brain">
+      <div class="notice">
+        仿真演示：对标华泰「产业大脑」五链贯通（采购 / 生产 / 销售 / 仓储物流 / 资金财务），
+        五域共享数据底座，跨域联动可观测。<b>KPI 为仿真值</b>，下方华泰成效仅作对标参考，非本项目成果。
+      </div>
+      <div class="mill-ctrl">
+        <button id="brainRunBtn" onclick="brainAction('run')">推演 5 步</button>
+        <button class="ghost" id="brainAdviseBtn" onclick="brainAction('advise')">领域智能体会商</button>
+        <button class="ghost" id="brainResetBtn" onclick="brainAction('reset')">重置</button>
+      </div>
+      <div class="mill-status" id="brainStatus">产业大脑待推演。</div>
+
+      <div class="sect-title"><span>五条业务链</span><span class="hintline" id="brainStepLabel"></span></div>
+      <div class="brain-chain" id="brainChain"></div>
+
+      <div class="brain-grid" id="brainCards"></div>
+
+      <div class="sect-title"><span>领域智能体建议</span><span class="hintline">配置 API 后用大模型，否则回落规则</span></div>
+      <div id="brainAdvices"></div>
+
+      <div class="sect-title"><span>管理干预推演</span><span class="hintline">改一个 KPI，看跨域传导</span></div>
+      <div class="opt-form">
+        <select id="optDomain"></select>
+        <select id="optKpi"></select>
+        <input id="optTarget" type="number" step="0.1" value="85" />
+      </div>
+      <div class="mill-ctrl" style="margin-bottom:8px">
+        <button class="ghost" onclick="brainOptimize()">执行干预</button>
+      </div>
+
+      <div class="sect-title"><span>华泰公开成效（对标参考）</span><span class="hintline">非本项目成果</span></div>
+      <div id="brainBenchmarks"></div>
+
+      <div class="sect-title"><span>联动日志</span><span class="hintline" id="brainLogHint"></span></div>
+      <div class="mill-log" id="brainLog"></div>
+    </section>
+
     <!-- 消耗地图 -->
     <section class="pane" id="pane-map">
       <div class="yearbar">
@@ -594,6 +666,7 @@
     if (name === "io") loadIO(state.year);
     if (name === "map") loadMap(state.year);
     if (name === "mill") loadMill();
+    if (name === "brain") loadBrain();
     if (name === "settings") loadSettings();
   }
 
@@ -1742,6 +1815,149 @@
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
       ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+  }
+
+  /* ---------------- 产业大脑（五链贯通） ---------------- */
+  async function loadBrain() {
+    await brainRefresh();
+    const ds = document.getElementById("optDomain");
+    if (ds.options.length) return;
+    const states = (window.__brainSnap || {}).states || [];
+    states.forEach(st => {
+      const o = document.createElement("option");
+      o.value = st.key; o.textContent = st.name;
+      ds.appendChild(o);
+    });
+    ds.onchange = fillBrainKpis;
+    fillBrainKpis();
+  }
+
+  function fillBrainKpis() {
+    const key = document.getElementById("optDomain").value;
+    const ks = document.getElementById("optKpi");
+    ks.innerHTML = "";
+    const st = ((window.__brainSnap || {}).states || []).find(s => s.key === key);
+    (st ? st.kpi_defs : []).forEach(k => {
+      const o = document.createElement("option");
+      o.value = k.key; o.textContent = k.label + "(" + k.base + k.unit + ")";
+      ks.appendChild(o);
+    });
+  }
+
+  async function brainRefresh() {
+    try {
+      const res = await fetch("/api/brain/state");
+      const snap = await res.json();
+      window.__brainSnap = snap;
+      renderBrain(snap);
+    } catch (e) {}
+  }
+
+  function renderBrain(snap) {
+    document.getElementById("brainStepLabel").textContent = "推演步 " + snap.step;
+    document.getElementById("brainStatus").innerHTML = snap.step
+      ? '已完成 <b>' + snap.step + '</b> 步推演 · 五链共享数据底座'
+      : "产业大脑待推演。";
+
+    const chain = document.getElementById("brainChain");
+    chain.innerHTML = "";
+    snap.states.forEach((st, i) => {
+      const node = document.createElement("div");
+      node.className = "brain-node";
+      node.innerHTML = '<div class="bn">' + esc(st.name) + '</div>' +
+        '<div class="bv">' + esc(st.subtitle.split("·")[0].trim()) + '</div>';
+      chain.appendChild(node);
+      if (i < snap.states.length - 1) {
+        const ar = document.createElement("span");
+        ar.className = "brain-arrow"; ar.textContent = "→";
+        chain.appendChild(ar);
+      }
+    });
+
+    const cards = document.getElementById("brainCards");
+    cards.innerHTML = "";
+    snap.states.forEach(st => {
+      const card = document.createElement("div");
+      card.className = "brain-card";
+      let kpis = (st.kpi_defs || []).map(k => {
+        const v = st.kpis[k.key];
+        return '<div class="brain-kpi"><span class="k">' + esc(k.label) +
+          '</span><span class="v">' + (v === undefined ? "—" : v + k.unit) + '</span></div>';
+      }).join("");
+      const impact = (st.last_impact || []).length
+        ? '<div class="brain-impact">↳ ' + esc(st.last_impact.slice(0, 2).join("；")) + '</div>' : "";
+      card.innerHTML = '<div class="bc-h"><span>' + esc(st.name) + '</span>' +
+        '<span class="tag">领域智能体</span></div>' +
+        '<div class="bc-sub">' + esc(st.subtitle) + '</div>' + kpis + impact;
+      cards.appendChild(card);
+    });
+
+    const bench = document.getElementById("brainBenchmarks");
+    bench.innerHTML = "";
+    (snap.benchmarks || []).forEach(b => {
+      const row = document.createElement("div");
+      row.className = "bench-row";
+      row.innerHTML = '<span>' + esc(b.metric) +
+        '<div class="bs">' + esc(b.source) + '</div></span>' +
+        '<span class="bv">' + esc(b.value) + '</span>';
+      bench.appendChild(row);
+    });
+
+    const log = document.getElementById("brainLog");
+    log.innerHTML = "";
+    (snap.log || []).slice().reverse().forEach(ln => {
+      const div = document.createElement("div");
+      div.className = "ln";
+      const detail = ln.event === "link"
+        ? esc(ln.src) + '·' + esc(ln.src_kpi) + ' → ' + esc(ln.dst) + '·' + esc(ln.dst_kpi)
+          + ' (' + (ln.change > 0 ? '+' : '') + ln.change + ')'
+        : esc(ln.event) + (ln.domain ? ' [' + esc(ln.domain) + ']' : '');
+      div.innerHTML = '<span class="tm">#' + ln.step + '</span> <span class="ev">' + detail + '</span>';
+      log.appendChild(div);
+    });
+    document.getElementById("brainLogHint").textContent = (snap.log || []).length + " 条";
+  }
+
+  function renderBrainAdvices(advices) {
+    const el = document.getElementById("brainAdvices");
+    el.innerHTML = "";
+    advices.forEach(a => {
+      const row = document.createElement("div");
+      row.className = "brain-advice";
+      row.innerHTML = '<b>' + esc(a.domain_name) + '智能体</b> ' +
+        '<span class="basis">[' + (a.basis === "llm" ? "大模型" : "规则引擎") + ']</span><br>' +
+        esc(a.headline) + (a.detail ? '<div class="bd">' + esc(a.detail) + '</div>' : '');
+      el.appendChild(row);
+    });
+  }
+
+  async function brainAction(action) {
+    const btn = document.getElementById("brain" + action.charAt(0).toUpperCase() + action.slice(1) + "Btn");
+    if (btn) btn.disabled = true;
+    try {
+      let res;
+      if (action === "run") res = await fetch("/api/brain/run", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({steps:5})});
+      else if (action === "advise") res = await fetch("/api/brain/advise", {method:"POST"});
+      else if (action === "reset") res = await fetch("/api/brain/reset", {method:"POST"});
+      const data = await res.json();
+      if (action === "advise") { renderBrain(data.snapshot); renderBrainAdvices(data.advices); }
+      else renderBrain(data);
+    } catch (e) {} finally { if (btn) btn.disabled = false; }
+  }
+
+  async function brainOptimize() {
+    const domain = document.getElementById("optDomain").value;
+    const kpi = document.getElementById("optKpi").value;
+    const target = parseFloat(document.getElementById("optTarget").value);
+    if (!kpi || isNaN(target)) return;
+    try {
+      const res = await fetch("/api/brain/optimize", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({domain:domain, kpi:kpi, target:target})});
+      const data = await res.json();
+      if (data.ok) renderBrain(data.snapshot);
+    } catch (e) {}
   }
 </script>
 </body>

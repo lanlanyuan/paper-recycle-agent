@@ -24,36 +24,41 @@
 
 | 层级 | 文件数 | 物理行 | 空行 | 注释 | 文档字符串 | 内嵌模板 | **有效代码行** |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 核心领域逻辑（`core`） | 13 | 2741 | 376 | 92 | 272 | 0 | **2043** |
-| Web 层（`web`） | 3 | 2286 | 220 | 62 | 53 | 0 | **1954** |
-| 测试（`tests`） | 15 | 1701 | 479 | 42 | 89 | 0 | **1103** |
+| 核心领域逻辑（`core`） | 18 | 3503 | 484 | 104 | 367 | 0 | **2602** |
+| Web 层（`web`） | 3 | 2564 | 255 | 67 | 63 | 0 | **2182** |
+| 测试（`tests`） | 16 | 1881 | 524 | 48 | 95 | 0 | **1227** |
 | 工具脚本（`tools`） | 7 | 2332 | 299 | 114 | 55 | 676 | **1235** |
-| **合计** | **38** | **9060** | **1374** | **310** | **469** | **676** | **6335** |
+| **合计** | **44** | **10280** | **1562** | **333** | **580** | **676** | **7246** |
 
-有效代码行占物理行的 **69.9%**，其余为空白、注释、文档字符串与内嵌模板。
+有效代码行占物理行的 **70.5%**，其余为空白、注释、文档字符串与内嵌模板。
 
 ## 三、逐文件明细（仅计入的层级）
 
 | 文件 | 语言 | 层级 | 物理行 | 空行 | 注释 | 文档串 | 模板 | 有效代码行 |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `app/static/index.html` | HTML | Web 层 | 1748 | 122 | 48 | 0 | 0 | 1578 |
+| `app/static/index.html` | HTML | Web 层 | 1964 | 141 | 51 | 0 | 0 | 1772 |
 | `tools/count_loc.py` | Python | 工具脚本 | 606 | 96 | 40 | 1 | 35 | 445 |
-| `app/server.py` | Python | Web 层 | 517 | 91 | 13 | 48 | 0 | 367 |
+| `app/server.py` | Python | Web 层 | 579 | 107 | 15 | 58 | 0 | 401 |
 | `src/paper_recycle_agent/io_table.py` | Python | 核心领域逻辑 | 487 | 69 | 30 | 76 | 0 | 327 |
 | `src/paper_recycle_agent/exporter.py` | Python | 核心领域逻辑 | 363 | 42 | 8 | 25 | 0 | 291 |
 | `src/paper_recycle_agent/llm.py` | Python | 核心领域逻辑 | 360 | 43 | 2 | 39 | 0 | 281 |
 | `src/paper_recycle_agent/enterprises.py` | Python | 核心领域逻辑 | 326 | 47 | 3 | 29 | 0 | 251 |
 | `src/paper_recycle_agent/regions.py` | Python | 核心领域逻辑 | 326 | 57 | 11 | 31 | 0 | 231 |
+| `src/paper_recycle_agent/mill/agents.py` | Python | 核心领域逻辑 | 250 | 35 | 4 | 22 | 0 | 191 |
 | `tools/check_history.py` | Python | 工具脚本 | 239 | 50 | 3 | 20 | 0 | 170 |
 | `tools/push_to_github.sh` | Shell | 工具脚本 | 236 | 28 | 39 | 0 | 0 | 169 |
 | `src/paper_recycle_agent/stats.py` | Python | 核心领域逻辑 | 239 | 30 | 17 | 32 | 0 | 166 |
 | `tests/test_history.py` | Python | 测试 | 216 | 52 | 8 | 10 | 0 | 147 |
 | `tools/publish_to_github.sh` | Shell | 工具脚本 | 205 | 35 | 27 | 0 | 0 | 143 |
+| `src/paper_recycle_agent/mill/simulation.py` | Python | 核心领域逻辑 | 187 | 24 | 5 | 26 | 0 | 134 |
 | `tests/test_count_loc.py` | Python | 测试 | 211 | 45 | 15 | 20 | 0 | 134 |
 | `tools/check_compat.py` | Python | 工具脚本 | 174 | 25 | 4 | 14 | 0 | 134 |
 | `tests/test_io_table.py` | Python | 测试 | 231 | 73 | 8 | 21 | 0 | 131 |
 | `tests/test_llm.py` | Python | 测试 | 197 | 58 | 4 | 7 | 0 | 129 |
+| `tests/test_mill.py` | Python | 测试 | 180 | 45 | 6 | 6 | 0 | 124 |
 | `tests/test_compat.py` | Python | 测试 | 171 | 40 | 2 | 12 | 0 | 119 |
+| `src/paper_recycle_agent/mill/devices.py` | Python | 核心领域逻辑 | 152 | 24 | 1 | 17 | 0 | 112 |
+| `src/paper_recycle_agent/mill/processes.py` | Python | 核心领域逻辑 | 141 | 18 | 2 | 12 | 0 | 110 |
 | `src/paper_recycle_agent/agent.py` | Python | 核心领域逻辑 | 154 | 25 | 15 | 5 | 0 | 109 |
 | `tools/gen_code_listing.py` | Python | 工具脚本 | 135 | 25 | 1 | 8 | 0 | 103 |
 | `src/paper_recycle_agent/cli.py` | Python | 核心领域逻辑 | 105 | 13 | 0 | 1 | 0 | 91 |
@@ -68,10 +73,11 @@
 | `tests/test_regions.py` | Python | 测试 | 86 | 24 | 0 | 1 | 0 | 61 |
 | `tests/test_stats.py` | Python | 测试 | 84 | 24 | 0 | 1 | 0 | 59 |
 | `src/paper_recycle_agent/pricing.py` | Python | 核心领域逻辑 | 47 | 7 | 0 | 5 | 0 | 36 |
-| `src/paper_recycle_agent/__init__.py` | Python | 核心领域逻辑 | 35 | 6 | 0 | 5 | 0 | 25 |
+| `src/paper_recycle_agent/__init__.py` | Python | 核心领域逻辑 | 36 | 6 | 0 | 5 | 0 | 26 |
 | `tests/test_classifier.py` | Python | 测试 | 29 | 10 | 0 | 0 | 0 | 19 |
 | `tests/test_data.py` | Python | 测试 | 24 | 8 | 0 | 0 | 0 | 16 |
 | `tests/test_pricing.py` | Python | 测试 | 23 | 8 | 0 | 0 | 0 | 15 |
+| `src/paper_recycle_agent/mill/__init__.py` | Python | 核心领域逻辑 | 31 | 7 | 0 | 18 | 0 | 11 |
 | `run.py` | Python | Web 层 | 21 | 7 | 1 | 5 | 0 | 9 |
 | `conftest.py` | Python | 测试 | 15 | 4 | 0 | 5 | 0 | 7 |
 
@@ -81,9 +87,9 @@
 
 | 分段 | 物理行 | 空行 | 注释 | 有效代码行 |
 | --- | ---: | ---: | ---: | ---: |
-| HTML 结构 | 334 | 16 | 8 | 310 |
-| CSS 样式 | 196 | 16 | 8 | 172 |
-| JavaScript 逻辑 | 1218 | 90 | 32 | 1096 |
+| HTML 结构 | 373 | 23 | 9 | 341 |
+| CSS 样式 | 229 | 17 | 9 | 203 |
+| JavaScript 逻辑 | 1362 | 101 | 33 | 1228 |
 
 ## 四、不计入的文件及理由
 
@@ -109,6 +115,7 @@
 | 文档 | `docs/DEVLOG.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/EFFECTIVE_LOC.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/ISSUES.md` | 文档，不是可执行逻辑 |
+| 文档 | `docs/MILL_AGENTS.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/REPO_PROVENANCE.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/UPLOAD_TO_GITHUB.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/USAGE.md` | 文档，不是可执行逻辑 |
