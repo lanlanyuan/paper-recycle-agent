@@ -644,4 +644,7 @@ git status                    工作区干净
 - 新增 `tests/test_carbon.py` 19 项，重点是「可手算复核」：烟煤 1000t 的 EF 精确值、
   过程/热力/电力分项、废水甲烷、净输出电力扣减、总量手算、情景模拟、范围三单列、
   桥接不覆盖、EEIOA 无数据返回、API 冒烟
-- 全套 216 → **235 项通过**；`check_compat.py`（3.7/52 文件）、`count_loc.py --check`（8048 行）均通过
+- 全套 216 → **235 项通过**；`check_compat.py`（3.7/52 文件）、`count_loc.py --check`（8672 行）均通过
+- LOC 口径修正：v1.9.0 首次统计在 feature 分支上跑，`git ls-files` 尚未跟踪 carbon/brain/mill 的 `__init__.py`，
+  得到 8048；合并到 main 后这些文件已被跟踪，重新统计得 8672（core 3478 / Web 2497 / 测试 1462 / 工具 1235），
+  以合并后的 8672 为准。教训：LOC 这类依赖 `git ls-files` 的统计必须在合并后的 main 上跑。

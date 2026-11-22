@@ -73,7 +73,7 @@ tools/                       兼容校验 / 历史自洽 / LOC 统计 / 代码�
 ```bash
 PYTHONPATH=src python -m pytest -q   # 235 passed
 python tools/check_compat.py          # Python 3.7 兼容
-python tools/count_loc.py --check     # 有效代码 8048 行
+python tools/count_loc.py --check     # 有效代码 8672 行（core 3478 / Web 2497 / 测试 1462 / 工具 1235）
 python tools/check_history.py         # 连续开发历史自洽（6 项）
 ```
 

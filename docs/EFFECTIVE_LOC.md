@@ -24,13 +24,13 @@
 
 | 层级 | 文件数 | 物理行 | 空行 | 注释 | 文档字符串 | 内嵌模板 | **有效代码行** |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 核心领域逻辑（`core`） | 22 | 4026 | 551 | 121 | 429 | 0 | **2990** |
+| 核心领域逻辑（`core`） | 27 | 4736 | 642 | 147 | 556 | 0 | **3478** |
 | Web 层（`web`） | 3 | 2942 | 298 | 74 | 76 | 0 | **2497** |
-| 测试（`tests`） | 17 | 2033 | 564 | 54 | 103 | 0 | **1326** |
+| 测试（`tests`） | 18 | 2237 | 617 | 62 | 111 | 0 | **1462** |
 | 工具脚本（`tools`） | 7 | 2332 | 299 | 114 | 55 | 676 | **1235** |
-| **合计** | **49** | **11333** | **1712** | **363** | **663** | **676** | **8048** |
+| **合计** | **55** | **12247** | **1856** | **397** | **798** | **676** | **8672** |
 
-有效代码行占物理行的 **71.0%**，其余为空白、注释、文档字符串与内嵌模板。
+有效代码行占物理行的 **70.8%**，其余为空白、注释、文档字符串与内嵌模板。
 
 ## 三、逐文件明细（仅计入的层级）
 
@@ -44,6 +44,7 @@
 | `src/paper_recycle_agent/llm.py` | Python | 核心领域逻辑 | 360 | 43 | 2 | 39 | 0 | 281 |
 | `src/paper_recycle_agent/enterprises.py` | Python | 核心领域逻辑 | 326 | 47 | 3 | 29 | 0 | 251 |
 | `src/paper_recycle_agent/regions.py` | Python | 核心领域逻辑 | 326 | 57 | 11 | 31 | 0 | 231 |
+| `src/paper_recycle_agent/carbon/accounting.py` | Python | 核心领域逻辑 | 269 | 24 | 6 | 29 | 0 | 213 |
 | `src/paper_recycle_agent/mill/agents.py` | Python | 核心领域逻辑 | 250 | 35 | 4 | 22 | 0 | 191 |
 | `tools/check_history.py` | Python | 工具脚本 | 239 | 50 | 3 | 20 | 0 | 170 |
 | `tools/push_to_github.sh` | Shell | 工具脚本 | 236 | 28 | 39 | 0 | 0 | 169 |
@@ -51,6 +52,7 @@
 | `tests/test_history.py` | Python | 测试 | 216 | 52 | 8 | 10 | 0 | 147 |
 | `tools/publish_to_github.sh` | Shell | 工具脚本 | 205 | 35 | 27 | 0 | 0 | 143 |
 | `src/paper_recycle_agent/brain/engine.py` | Python | 核心领域逻辑 | 190 | 24 | 11 | 17 | 0 | 141 |
+| `tests/test_carbon.py` | Python | 测试 | 204 | 53 | 8 | 8 | 0 | 136 |
 | `src/paper_recycle_agent/mill/simulation.py` | Python | 核心领域逻辑 | 187 | 24 | 5 | 26 | 0 | 134 |
 | `tests/test_count_loc.py` | Python | 测试 | 211 | 45 | 15 | 20 | 0 | 134 |
 | `tools/check_compat.py` | Python | 工具脚本 | 174 | 25 | 4 | 14 | 0 | 134 |
@@ -64,10 +66,13 @@
 | `src/paper_recycle_agent/mill/processes.py` | Python | 核心领域逻辑 | 141 | 18 | 2 | 12 | 0 | 110 |
 | `src/paper_recycle_agent/agent.py` | Python | 核心领域逻辑 | 154 | 25 | 15 | 5 | 0 | 109 |
 | `tools/gen_code_listing.py` | Python | 工具脚本 | 135 | 25 | 1 | 8 | 0 | 103 |
+| `src/paper_recycle_agent/carbon/factors.py` | Python | 核心领域逻辑 | 152 | 22 | 10 | 21 | 0 | 102 |
 | `tests/test_brain.py` | Python | 测试 | 152 | 40 | 6 | 8 | 0 | 99 |
 | `src/paper_recycle_agent/cli.py` | Python | 核心领域逻辑 | 105 | 13 | 0 | 1 | 0 | 91 |
 | `src/paper_recycle_agent/data.py` | Python | 核心领域逻辑 | 114 | 12 | 3 | 11 | 0 | 89 |
 | `src/paper_recycle_agent/knowledge.py` | Python | 核心领域逻辑 | 99 | 8 | 2 | 5 | 0 | 85 |
+| `src/paper_recycle_agent/carbon/recycle_agent.py` | Python | 核心领域逻辑 | 133 | 19 | 0 | 37 | 0 | 84 |
+| `src/paper_recycle_agent/carbon/model.py` | Python | 核心领域逻辑 | 121 | 18 | 10 | 16 | 0 | 80 |
 | `tools/build_offline.py` | Python | 工具脚本 | 737 | 40 | 0 | 12 | 641 | 71 |
 | `tests/test_exporter.py` | Python | 测试 | 102 | 30 | 3 | 0 | 0 | 69 |
 | `tests/test_server.py` | Python | 测试 | 113 | 36 | 2 | 9 | 0 | 68 |
@@ -83,6 +88,7 @@
 | `tests/test_pricing.py` | Python | 测试 | 23 | 8 | 0 | 0 | 0 | 15 |
 | `src/paper_recycle_agent/mill/__init__.py` | Python | 核心领域逻辑 | 31 | 7 | 0 | 18 | 0 | 11 |
 | `run.py` | Python | Web 层 | 21 | 7 | 1 | 5 | 0 | 9 |
+| `src/paper_recycle_agent/carbon/__init__.py` | Python | 核心领域逻辑 | 35 | 8 | 0 | 24 | 0 | 9 |
 | `src/paper_recycle_agent/brain/__init__.py` | Python | 核心领域逻辑 | 26 | 5 | 0 | 16 | 0 | 8 |
 | `conftest.py` | Python | 测试 | 15 | 4 | 0 | 5 | 0 | 7 |
 
@@ -113,6 +119,7 @@
 | 配置 / 模板数据 | `data/enterprises.csv.example` | 配置 / 模板数据，不含应用逻辑 |
 | 配置 / 模板数据 | `data/io_matrix.csv.example` | 配置 / 模板数据，不含应用逻辑 |
 | 生成物 | `dist/paper-recycle-offline.html` | 构建产物，内容由源码生成，计入即重复计数 |
+| 文档 | `docs/CARBON_AGENT.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/CHANGELOG.md` | 文档，不是可执行逻辑 |
 | 生成物 | `docs/CODE_LISTING.md` | 构建产物，内容由源码生成，计入即重复计数 |
 | 文档 | `docs/CONTRIBUTING.md` | 文档，不是可执行逻辑 |
@@ -122,6 +129,7 @@
 | 文档 | `docs/INDUSTRY_BRAIN.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/ISSUES.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/MILL_AGENTS.md` | 文档，不是可执行逻辑 |
+| 文档 | `docs/RECYCLE_AGENT.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/REPO_PROVENANCE.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/UPLOAD_TO_GITHUB.md` | 文档，不是可执行逻辑 |
 | 文档 | `docs/USAGE.md` | 文档，不是可执行逻辑 |
