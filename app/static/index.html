@@ -156,12 +156,56 @@
   .std-cat { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; margin-top: 6px; font-size: 11px; }
   .std-cat .nm { font-weight: 600; font-size: 12px; }
   .std-cat .ex, .std-cat .nt { color: var(--muted); margin-top: 2px; }
+
+  /* ---------- 智能工厂（多智能体仿真） ---------- */
+  .mill-ctrl { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mill-ctrl button { height: 31px; padding: 0 11px; border-radius: 8px; font-size: 12px;
+                      cursor: pointer; border: 1px solid var(--brand); background: var(--brand); color: #fff; }
+  .mill-ctrl button.ghost { background: #fff; color: var(--brand); }
+  .mill-ctrl button.amber { background: #fff; color: #8a6d1f; border-color: #e2c572; }
+  .mill-ctrl button:disabled { opacity: .55; cursor: default; }
+  .mill-status { font-size: 11.5px; color: var(--muted); margin: 0 0 9px; line-height: 1.5; }
+  .mill-status b { color: var(--ink); }
+  .pipe { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
+  .stage { flex: 1; border: 1px solid var(--border); border-radius: 9px; padding: 7px 6px;
+           background: #fbfcfd; min-width: 0; }
+  .stage.running { border-color: var(--brand); background: #f0f8f3; }
+  .stage.done { border-color: var(--brand-line); background: #eef6f0; }
+  .stage.held { border-color: #e2c572; background: var(--warn-bg); }
+  .stage .nm { font-size: 12px; font-weight: 600; }
+  .stage .st { font-size: 10px; margin-top: 2px; color: var(--muted); }
+  .stage.running .st { color: var(--brand); }
+  .stage.held .st { color: var(--warn-ink); }
+  .stage .mini { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .stage .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; }
+  .dot.normal { background: #4a9d6b; } .dot.warn { background: #e0a33a; } .dot.critical { background: #d64545; }
+  .agent-row { border-left: 3px solid var(--brand-line); padding: 5px 9px; margin-bottom: 5px;
+               background: #fbfcfd; border-radius: 0 7px 7px 0; font-size: 11.5px; line-height: 1.5; }
+  .agent-row.warn { border-left-color: #e0a33a; } .agent-row.critical { border-left-color: #d64545; }
+  .agent-row .who { font-weight: 600; }
+  .agent-row .basis { font-size: 10px; color: var(--muted); }
+  .agent-row .advice { color: var(--ink); margin-top: 2px; }
+  .dev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .dev { border: 1px solid var(--border); border-radius: 7px; padding: 5px 7px; font-size: 11px;
+         background: #fff; display: flex; justify-content: space-between; gap: 5px; }
+  .dev .dn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dev .ds { color: var(--muted); } .dev.busy .ds { color: var(--brand); }
+  .mill-log { max-height: 150px; overflow-y: auto; border: 1px solid var(--border);
+              border-radius: 8px; font-size: 10.5px; line-height: 1.6; padding: 5px 8px; background: #fbfcfd; }
+  .mill-log .ln { border-bottom: 1px dashed var(--border); padding: 1px 0; }
+  .mill-log .ln:last-child { border-bottom: none; }
+  .mill-log .ev { color: var(--brand); } .mill-log .tm { color: var(--muted); }
+  .anomaly-form { display: grid; grid-template-columns: 1fr 1fr 66px; gap: 5px; margin-bottom: 6px; }
+  .anomaly-form select, .anomaly-form input { height: 27px; border: 1px solid var(--border);
+       border-radius: 6px; padding: 0 5px; font-size: 11px; color: var(--ink); background: #fff; min-width: 0; }
+  .anomaly-form button { height: 27px; border-radius: 6px; border: 1px solid #e2c572;
+       background: #fff; color: #8a6d1f; font-size: 11px; cursor: pointer; }
   @media (max-width: 980px) { .side { display: none; } }
 </style>
 </head>
 <body>
 <header>🪨 废纸回收 Agent 对话助手
-  <span class="sub">v1.6.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 消耗地图 · 语音</span>
+  <span class="sub">v1.7.0 · 区域 · 历年 · 八大类 · 企业 · 投入产出 · 智能工厂 · 消耗地图 · 语音</span>
 </header>
 <div class="layout">
   <div class="chat">
@@ -183,6 +227,7 @@
       <div class="tab" data-pane="category" onclick="switchTab('category')">分类结构</div>
       <div class="tab" data-pane="enterprise" onclick="switchTab('enterprise')">企业分布</div>
       <div class="tab" data-pane="io" onclick="switchTab('io')">投入产出</div>
+      <div class="tab" data-pane="mill" onclick="switchTab('mill')">智能工厂</div>
       <div class="tab" data-pane="map" onclick="switchTab('map')">消耗地图</div>
       <div class="tab" data-pane="settings" onclick="switchTab('settings')">设置</div>
     </div>
@@ -369,6 +414,43 @@
       </div>
     </section>
 
+    <!-- 智能工厂（多智能体仿真） -->
+    <section class="pane" id="pane-mill">
+      <div class="notice">
+        仿真演示：四道工序各由一个智能体负责，总调度器编排任务、派机器狗与 AGV 作业。
+        工况为仿真生成，设备为内存模拟对象，<b>不连接任何真实产线</b>。
+      </div>
+      <div class="mill-ctrl">
+        <button id="millStartBtn" onclick="millAction('start')">投批次</button>
+        <button class="ghost" id="millStepBtn" onclick="millAction('step')">单步</button>
+        <button class="ghost" id="millRunBtn" onclick="millAction('run')">自动跑完</button>
+        <button class="ghost" id="millResetBtn" onclick="millAction('reset')">重置</button>
+      </div>
+      <div class="mill-status" id="millStatus">尚未投产，点「投批次」开始。</div>
+
+      <div class="sect-title"><span>工序流水线</span><span class="hintline" id="millStepLabel"></span></div>
+      <div class="pipe" id="millPipe"></div>
+
+      <div class="sect-title"><span>智能体决策</span><span class="hintline">配置 API 后用大模型，否则回落规则</span></div>
+      <div id="millAgents"></div>
+
+      <div class="sect-title"><span>设备任务</span><span class="hintline" id="millDevHint"></span></div>
+      <div class="dev-grid" id="millDevices"></div>
+
+      <div class="sect-title"><span>异常注入（演示处置链）</span></div>
+      <div class="anomaly-form">
+        <select id="anomProcess"></select>
+        <select id="anomMetric"></select>
+        <input id="anomValue" type="number" step="0.1" value="0" />
+      </div>
+      <div class="mill-ctrl" style="margin-bottom:8px">
+        <button class="amber" onclick="millInject()">注入异常</button>
+      </div>
+
+      <div class="sect-title"><span>调度日志</span><span class="hintline" id="millLogHint"></span></div>
+      <div class="mill-log" id="millLog"></div>
+    </section>
+
     <!-- 消耗地图 -->
     <section class="pane" id="pane-map">
       <div class="yearbar">
@@ -511,6 +593,7 @@
     if (name === "enterprise") loadEnterprises();
     if (name === "io") loadIO(state.year);
     if (name === "map") loadMap(state.year);
+    if (name === "mill") loadMill();
     if (name === "settings") loadSettings();
   }
 
@@ -1514,6 +1597,152 @@
          "语音输入若不可用，页面输入框下方会直接告诉你原因。", "bot");
   loadStats("CN", 2024);
   loadInfo();
+
+  /* ---------------- 智能工厂（多智能体仿真） ---------------- */
+  let millProcDefs = null;
+  const STATE_LABEL = {idle: "待机", running: "运行中", done: "完成", held: "已挂起"};
+
+  async function loadMill() {
+    if (!millProcDefs) {
+      try {
+        const res = await fetch("/api/mill/processes");
+        millProcDefs = await res.json();
+        fillAnomalySelects();
+      } catch (e) { return; }
+    }
+    await millRefresh();
+  }
+
+  function fillAnomalySelects() {
+    const ps = document.getElementById("anomProcess");
+    const ms = document.getElementById("anomMetric");
+    ps.innerHTML = "";
+    millProcDefs.order.forEach(k => {
+      const o = document.createElement("option");
+      o.value = k; o.textContent = millProcDefs.processes[k].name;
+      ps.appendChild(o);
+    });
+    ps.onchange = fillAnomalyMetrics;
+    fillAnomalyMetrics();
+  }
+
+  function fillAnomalyMetrics() {
+    const k = document.getElementById("anomProcess").value;
+    const ms = document.getElementById("anomMetric");
+    ms.innerHTML = "";
+    (millProcDefs.processes[k].metrics || []).forEach(m => {
+      const o = document.createElement("option");
+      o.value = m.key;
+      o.textContent = m.label + "(" + m.low + "~" + m.high + m.unit + ")";
+      ms.appendChild(o);
+    });
+  }
+
+  async function millRefresh() {
+    try {
+      const res = await fetch("/api/mill/state");
+      renderMill(await res.json());
+    } catch (e) {}
+  }
+
+  function renderMill(snap) {
+    const sim = snap.sim;
+    document.getElementById("millStepLabel").textContent = "仿真步 " + sim.step;
+    document.getElementById("millStatus").innerHTML =
+      sim.batch ? '当前批次 <b>' + sim.batch + '</b> · ' + (sim.idle ? "流水线空闲" : "流水线运行中")
+                : "尚未投产，点「投批次」开始。";
+
+    const pipe = document.getElementById("millPipe");
+    pipe.innerHTML = "";
+    sim.stages.forEach(st => {
+      const d = document.createElement("div");
+      d.className = "stage " + st.state;
+      const dots = Object.keys(st.metric_status || {}).map(k =>
+        '<span class="dot ' + st.metric_status[k] + '"></span>').join("");
+      let mini = "";
+      if (millProcDefs && millProcDefs.processes[st.key]) {
+        mini = millProcDefs.processes[st.key].metrics.map(m => {
+          const v = st.metrics[m.key];
+          return v === undefined ? "" : m.label + " " + v + m.unit;
+        }).filter(Boolean).join("<br>");
+      }
+      d.innerHTML = '<div class="nm">' + dots + st.name + '</div>' +
+                    '<div class="st">' + (STATE_LABEL[st.state] || st.state) + '</div>' +
+                    '<div class="mini">' + mini + '</div>';
+      pipe.appendChild(d);
+    });
+
+    const agents = document.getElementById("millAgents");
+    agents.innerHTML = "";
+    (snap.decisions || []).forEach(dec => {
+      const row = document.createElement("div");
+      row.className = "agent-row " + dec.status;
+      row.innerHTML = '<div><span class="who">' + dec.agent + '</span> ' +
+        '<span class="basis">[' + (dec.basis === "llm" ? "大模型" : "规则引擎") + ']</span></div>' +
+        '<div class="advice">' + esc(dec.advice) + '</div>';
+      agents.appendChild(row);
+    });
+    if (!snap.decisions || !snap.decisions.length)
+      agents.innerHTML = '<div class="mill-status">投产之后，各工序智能体的决策会显示在这里。</div>';
+
+    const devs = document.getElementById("millDevices");
+    devs.innerHTML = "";
+    (snap.devices || []).forEach(dv => {
+      const el = document.createElement("div");
+      el.className = "dev " + (dv.status === "busy" ? "busy" : "");
+      el.innerHTML = '<span class="dn">' + esc(dv.name) + '</span>' +
+        '<span class="ds">' + (dv.status === "busy" ? "作业中" : "空闲") +
+        (dv.done_count ? " · " + dv.done_count : "") + '</span>';
+      devs.appendChild(el);
+    });
+    document.getElementById("millDevHint").textContent =
+      (snap.devices || []).filter(d => d.status === "busy").length + " 台作业中 / 共 " + (snap.devices || []).length + " 台";
+
+    const log = document.getElementById("millLog");
+    log.innerHTML = "";
+    (snap.log || []).slice().reverse().forEach(ln => {
+      const div = document.createElement("div");
+      div.className = "ln";
+      div.innerHTML = '<span class="tm">#' + ln.step + '</span> ' +
+        '<span class="ev">' + esc(ln.event) + '</span> ' +
+        (ln.process ? '[' + esc(ln.process) + '] ' : '') +
+        esc(ln.reason || ln.message || ln.action || "");
+      log.appendChild(div);
+    });
+    document.getElementById("millLogHint").textContent = (snap.log || []).length + " 条";
+  }
+
+  async function millAction(action) {
+    const btn = document.getElementById("mill" + action.charAt(0).toUpperCase() + action.slice(1) + "Btn");
+    if (btn) btn.disabled = true;
+    try {
+      let res;
+      if (action === "start" || action === "run" || action === "reset")
+        res = await fetch("/api/mill/" + action, {method: "POST"});
+      else if (action === "step")
+        res = await fetch("/api/mill/step", {method: "POST",
+          headers: {"Content-Type": "application/json"}, body: JSON.stringify({steps: 1})});
+      if (res) renderMill(await res.json());
+    } catch (e) {} finally { if (btn) btn.disabled = false; }
+  }
+
+  async function millInject() {
+    const process = document.getElementById("anomProcess").value;
+    const metric = document.getElementById("anomMetric").value;
+    const value = parseFloat(document.getElementById("anomValue").value);
+    if (isNaN(value)) return;
+    try {
+      const res = await fetch("/api/mill/anomaly", {method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({process: process, metric: metric, value: value})});
+      renderMill((await res.json()).snapshot);
+    } catch (e) {}
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+      ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+  }
 </script>
 </body>
 </html>
