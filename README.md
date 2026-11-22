@@ -3,10 +3,12 @@
 ![CI](https://github.com/lanlanyuan/paper-recycle-agent/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.7-3776ab)
-![Tests](https://img.shields.io/badge/tests-169%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-202%20passed-brightgreen)
 ![Deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
 
 一个轻量级、纯标准库实现的废纸回收助手：识别废纸类型、判断是否可回收、按重量估算回收价值，并接入《中国造纸年鉴》/行业报告的废纸分类与行业数据，提供命令行与 Web 图形界面。
+
+**v1.7.0 新增「智能工厂」**：把造纸流程拆成制浆 / 抄纸 / 干燥 / 质检四道工序，每道工序由一个子智能体负责，总调度器编排任务、派机器狗与 AGV 作业，支持异常注入与处置链演示。这是**仿真演示，不连接任何真实产线**——详见 [docs/MILL_AGENTS.md](docs/MILL_AGENTS.md)。
 
 ## 三种打开方式（任选其一）
 
@@ -78,6 +80,7 @@ python tools/check_compat.py     # 用 3.7 语法树解析全部源码 + 扫描 
 - **麦克风自检**：真实读取音频流算 RMS，判断「能不能收音」而不只是「有没有权限」
 - **一键导出多表 Excel**（省级 / 分类 / 历年 / 进口 / 企业 / 投入产出 / 数据说明 七张表）
 - **对话支持语音输入**（浏览器 Web Speech API，失败时在输入框下方显示具体原因）
+- **智能工厂多智能体仿真**（v1.7.0）：四道工序子智能体 + 总调度器 + AGV/机器狗/PLC 模拟，异常注入演示处置链，决策标注 rule/llm 来源；详见 [docs/MILL_AGENTS.md](docs/MILL_AGENTS.md)
 - **Web 图形界面**：FastAPI 聊天页 + 七个标签页（区域 / 历年 / 分类 / 企业 / 投入产出 / 消耗地图 / 设置）
 - **核心零依赖、Python 3.7 起可用**；openpyxl 为可选依赖，缺失时导出接口返回 503 并给出安装提示
 - GitHub Actions 多版本 CI（3.8 / 3.11 / 3.13 跑全量，3.7 跑零依赖核心）
