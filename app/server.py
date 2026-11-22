@@ -20,6 +20,11 @@
   POST /api/mill/run     -> 跑到流水线空闲
   POST /api/mill/anomaly -> 注入工序参数异常（演示处置链）
   POST /api/mill/reset   -> 重置仿真
+  GET  /api/brain/state  -> 产业大脑：五域 KPI + 跨域联动 + 对标参考
+  POST /api/brain/run    -> 推演 N 步
+  POST /api/brain/advise -> 五个领域智能体给建议
+  POST /api/brain/optimize -> 模拟管理干预，观察跨域传导
+  POST /api/brain/reset  -> 重置产业大脑
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
   POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
@@ -42,6 +47,8 @@ from paper_recycle_agent import (enterprises, exporter, io_table, llm, regions,
                                  respond)
 from paper_recycle_agent import stats as stats_mod
 from paper_recycle_agent.mill.agents import Orchestrator
+from paper_recycle_agent.brain.engine import IndustryBrain
+from paper_recycle_agent.brain.intelligence import BrainOrchestrator
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
 
@@ -49,6 +56,10 @@ app = FastAPI(title="废纸回收 Agent 对话助手")
 # 这是仿真对象，不连接任何真实设备。
 _MILL = Orchestrator()
 _MILL_LOCK = threading.Lock()
+
+# 产业大脑仿真：五条业务链共享数据底座 + 跨域联动（同样是仿真对象）
+_BRAIN = BrainOrchestrator(brain=IndustryBrain())
+_BRAIN_LOCK = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -454,6 +465,57 @@ def mill_reset() -> dict:
     with _MILL_LOCK:
         _MILL = Orchestrator()
         return _MILL.snapshot()
+
+
+# ---------------- 产业大脑仿真（五链贯通） ----------------
+
+class BrainRunReq(BaseModel):
+    steps: int = 5
+
+
+class BrainOptimizeReq(BaseModel):
+    domain: str
+    kpi: str
+    target: float
+
+
+@app.get("/api/brain/state")
+def brain_state() -> dict:
+    """产业大脑快照：五域 KPI、跨域联动规则、对标参考。"""
+    with _BRAIN_LOCK:
+        return _BRAIN.snapshot()
+
+
+@app.post("/api/brain/run")
+def brain_run(req: BrainRunReq) -> dict:
+    """推演 N 步（上限 30）。"""
+    with _BRAIN_LOCK:
+        _BRAIN.brain.run(req.steps)
+        return _BRAIN.snapshot()
+
+
+@app.post("/api/brain/advise")
+def brain_advise() -> dict:
+    """五个领域智能体各自给建议。"""
+    with _BRAIN_LOCK:
+        advices = _BRAIN.advise_all()
+        return {"advices": advices, "snapshot": _BRAIN.snapshot()}
+
+
+@app.post("/api/brain/optimize")
+def brain_optimize(req: BrainOptimizeReq) -> dict:
+    """模拟管理干预：调某域 KPI，观察跨域传导。"""
+    with _BRAIN_LOCK:
+        return _BRAIN.brain.optimize(req.domain, req.kpi, req.target)
+
+
+@app.post("/api/brain/reset")
+def brain_reset() -> dict:
+    """重置产业大脑仿真。"""
+    global _BRAIN
+    with _BRAIN_LOCK:
+        _BRAIN = BrainOrchestrator(brain=IndustryBrain())
+        return _BRAIN.snapshot()
 
 
 @app.get("/export.xlsx")
