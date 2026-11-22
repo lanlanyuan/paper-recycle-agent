@@ -13,6 +13,13 @@
   POST /api/llm/config   -> 保存模型配置
   POST /api/llm/test     -> 连通性探测
   POST /api/llm/chat     -> 走大模型回答（未配置时回落规则引擎）
+  GET  /api/mill/processes -> 智能工厂：四道工序定义与专家知识
+  GET  /api/mill/state   -> 智能工厂：当前仿真快照
+  POST /api/mill/start   -> 投一个新生产批次
+  POST /api/mill/step    -> 推进 N 个仿真步
+  POST /api/mill/run     -> 跑到流水线空闲
+  POST /api/mill/anomaly -> 注入工序参数异常（演示处置链）
+  POST /api/mill/reset   -> 重置仿真
   GET  /export.xlsx      -> 多表 Excel 导出（?code=CN&year=2024）
   POST /chat             -> {"reply": "..."}（规则引擎）
   GET  /health           -> {"status": "ok"}
@@ -21,6 +28,7 @@
 import io
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -33,8 +41,14 @@ from paper_recycle_agent import data as yearbook
 from paper_recycle_agent import (enterprises, exporter, io_table, llm, regions,
                                  respond)
 from paper_recycle_agent import stats as stats_mod
+from paper_recycle_agent.mill.agents import Orchestrator
 
 app = FastAPI(title="废纸回收 Agent 对话助手")
+
+# 智能工厂仿真：全局单例 + 锁，保证并发请求不会把状态改乱。
+# 这是仿真对象，不连接任何真实设备。
+_MILL = Orchestrator()
+_MILL_LOCK = threading.Lock()
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -349,6 +363,97 @@ def llm_chat(req: LLMChatReq) -> dict:
         "reply": fallback,
         "llm_error": result.get("error", ""),
     }
+
+
+# ---------------- 智能工厂仿真（多智能体） ----------------
+
+class MillAnomalyReq(BaseModel):
+    process: str
+    metric: str
+    value: float
+
+
+class MillStepReq(BaseModel):
+    steps: int = 1
+
+
+@app.get("/api/mill/processes")
+def mill_processes() -> dict:
+    """返回四道工序定义（参数区间、责任设备、专家知识）。"""
+    from paper_recycle_agent.mill import processes as proc_mod
+    return {
+        "order": list(proc_mod.ORDER),
+        "processes": {
+            key: {
+                "key": p.key,
+                "name": p.name,
+                "subtitle": p.subtitle,
+                "devices": p.devices,
+                "knowledge": p.knowledge,
+                "base_time": p.base_time,
+                "metrics": [
+                    {
+                        "key": m.key, "label": m.label, "unit": m.unit,
+                        "low": m.low, "high": m.high,
+                    }
+                    for m in p.metrics
+                ],
+            }
+            for key, p in proc_mod.PROCESSES.items()
+        },
+    }
+
+
+@app.get("/api/mill/state")
+def mill_state() -> dict:
+    """当前仿真快照：工序状态、设备、智能体决策、调度日志。"""
+    with _MILL_LOCK:
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/start")
+def mill_start() -> dict:
+    """投一个新生产批次。"""
+    with _MILL_LOCK:
+        _MILL.start_batch()
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/step")
+def mill_step(req: MillStepReq) -> dict:
+    """推进 N 个仿真步（上限 60，防止一次请求跑太久）。"""
+    steps = max(1, min(int(req.steps), 60))
+    with _MILL_LOCK:
+        for _ in range(steps):
+            _MILL.step()
+        return _MILL.snapshot()
+
+
+@app.post("/api/mill/run")
+def mill_run() -> dict:
+    """一直跑到流水线空闲。"""
+    with _MILL_LOCK:
+        return _MILL.run_until_idle(max_steps=80)
+
+
+@app.post("/api/mill/anomaly")
+def mill_anomaly(req: MillAnomalyReq) -> dict:
+    """注入异常：强制某工序参数越界，演示智能体处置链。"""
+    with _MILL_LOCK:
+        ok = _MILL.sim.inject_anomaly(req.process, req.metric, req.value)
+        if ok:
+            _MILL._emit("anomaly_injected", process=req.process,
+                        metric=req.metric, value=req.value)
+        return {"ok": ok, "snapshot": _MILL.snapshot()}
+
+
+@app.post("/api/mill/reset")
+def mill_reset() -> dict:
+    """重置仿真（清空日志、批次、异常）。"""
+    global _MILL
+    with _MILL_LOCK:
+        _MILL = Orchestrator()
+        return _MILL.snapshot()
 
 
 @app.get("/export.xlsx")
