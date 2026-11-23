@@ -1,9 +1,9 @@
 # 代码清单
 
-> 版本：v1.9.0　生成日期：2026-11-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
+> 版本：v1.9.2　生成日期：2026-11-23　由 `tools/gen_code_listing.py` 自动生成，请勿手工编辑。
 
 本文档把仓库全部源码按模块顺序嵌入，便于在不打开仓库的情况下通读实现。
-- 生成时提交：`79a5c71`
+- 生成时提交：`c8b5e8e`
 
 ## 目录
 - 一、核心包（src/paper_recycle_agent）
@@ -42,7 +42,7 @@ from . import (agent, brain, carbon, classifier, data, enterprises,  # noqa: E40
                exporter, io_table, knowledge, llm, mill, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.9.0"
+__version__ = "1.9.2"
 
 __all__ = [
     "agent",
@@ -10186,7 +10186,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper-recycle-agent"
-version = "1.9.0"
+version = "1.9.2"
 description = "造纸工厂多智能体 · 碳核算 Agent：国标方法核算工厂排放，含废纸回收子 Agent、工艺智能体、产业大脑（核心逻辑纯标准库）"
 readme = "README.md"
 # 核心包只用到 dataclasses（3.7 引入），因此下限放到 3.7
