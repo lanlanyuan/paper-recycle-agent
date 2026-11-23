@@ -10,6 +10,7 @@ build/
 # 它的意义就是「不装任何东西也能双击打开」，如果还得先装 Python 来生成它，就自相矛盾了。
 dist/*
 !dist/paper-recycle-offline.html
+!dist/paper-mill-offline.html
 
 # Virtual environments
 .venv/

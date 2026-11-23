@@ -36,9 +36,68 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m uvicorn app.server:app --reload
 ```
 
-**离线单文件**：双击 `dist/paper-recycle-offline.html`，只要浏览器即可（含废纸回收统计的五个标签页，不含碳核算/地图/模型配置）。
+**离线单文件**（双击即开、零依赖、不用装 Python）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `dist/paper-mill-offline.html` | **造纸工艺仿真**：四工序 + 调度 + 异常注入，可投批次/单步/自动跑完 |
+| `dist/paper-recycle-offline.html` | 废纸回收统计五个标签页（不含碳核算/地图/模型配置） |
 
 运行环境：核心包**零依赖、Python 3.7 起**；Web 界面需 3.8+。`python tools/check_compat.py` 可验证 3.7 兼容性。
+
+## 运行造纸工艺模型（智能工厂仿真）
+
+四道工序——制浆 → 抄纸 → 干燥 → 质检——各由一个子智能体负责，总调度器编排任务、派 AGV / 机器狗 / PLC 作业。工况为仿真生成，设备为内存模拟对象，**不连接任何真实产线**。
+
+### 方式 A：网页界面（推荐）
+
+```bash
+# 1. 启动服务
+双击「启动本地版.bat」 → 浏览器打开 http://localhost:8000
+# 或命令行：
+PYTHONPATH=src python -m uvicorn app.server:app --reload
+
+# 2. 点顶部「智能工厂」标签页
+```
+
+面板上按顺序点四个按钮：
+
+| 按钮 | 作用 |
+| --- | --- |
+| 投批次 | 生成一个新批次，四道工序依次启动 |
+| 单步 | 每次推进一个仿真步，观察工况变化 |
+| 自动跑完 | 一直跑到流水线空闲（约 13 步，上限 80） |
+| 重置 | 清空批次、日志与异常 |
+
+跑起来后看三块：**工序流水线**（各工序实时工况，绿点正常 / 黄点越界）、**智能体决策**（配了 API Key 走大模型，否则回落规则引擎）、**设备任务与调度日志**。
+
+试试**异常注入**：选工序、指标、填越界值（例如「干燥 / steam_pressure / 0.9」，超出正常区间 0.3~0.6 MPa），点「注入异常」，能看到智能体挂起批次、给处置建议、再恢复的全过程。
+
+### 方式 B：命令行（零依赖，Python 3.7+）
+
+```bash
+PYTHONPATH=src python -c "from paper_recycle_agent.mill import Orchestrator; o=Orchestrator(); o.start_batch(); r=o.run_until_idle(max_steps=80); print('仿真步:', r['sim']['step'], '| 四道工序:', [(s['key'], s['state']) for s in r['sim']['stages']])"
+```
+
+### 方式 C：HTTP API（自己写前端 / 对接用）
+
+服务启动后可调这些接口：
+
+| 接口 | 方法 | 作用 |
+| --- | --- | --- |
+| `/api/mill/processes` | GET | 四道工序定义与指标区间 |
+| `/api/mill/state` | GET | 当前仿真快照 |
+| `/api/mill/start` | POST | 投新批次 |
+| `/api/mill/step` | POST | 推进 N 步（`{"steps":1}`，上限 60） |
+| `/api/mill/run` | POST | 自动跑到空闲 |
+| `/api/mill/anomaly` | POST | 注入异常（`{"process":"drying","metric":"steam_pressure","value":0.9}`） |
+| `/api/mill/reset` | POST | 重置仿真 |
+
+```bash
+curl -X POST http://localhost:8000/api/mill/start
+curl -X POST http://localhost:8000/api/mill/run
+curl http://localhost:8000/api/mill/state
+```
 
 ## 功能一览
 

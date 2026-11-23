@@ -21,7 +21,7 @@ from . import (agent, brain, carbon, classifier, data, enterprises,  # noqa: E40
                exporter, io_table, knowledge, llm, mill, pricing, regions, stats)
 from .agent import respond  # noqa: E402
 
-__version__ = "1.9.0"
+__version__ = "1.9.2"
 
 __all__ = [
     "agent",

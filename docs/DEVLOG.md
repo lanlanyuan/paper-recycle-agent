@@ -648,3 +648,24 @@ git status                    工作区干净
 - LOC 口径修正：v1.9.0 首次统计在 feature 分支上跑，`git ls-files` 尚未跟踪 carbon/brain/mill 的 `__init__.py`，
   得到 8048；合并到 main 后这些文件已被跟踪，重新统计得 8672（core 3478 / Web 2497 / 测试 1462 / 工具 1235），
   以合并后的 8672 为准。教训：LOC 这类依赖 `git ls-files` 的统计必须在合并后的 main 上跑。
+
+## v1.9.2 造纸工艺仿真离线 HTML + README 操作说明（2026-11-23）
+
+用户问「是否可以做运行 html」——现有离线版 `paper-recycle-offline.html` 只有废纸回收统计 5 个标签，不含造纸工艺仿真。这次把仿真搬到浏览器。
+
+**做法**：读透 `mill/` 四个源文件后，把仿真逻辑完整移植成自包含 JS（非简化演示，是同一套规则）：
+- `processes.py` → 工序/指标/区间/知识库常量（四工序 12 项指标，区间逐项照搬）
+- `simulation.py` → 状态机 + 确定性随机（Python `random.Random` 换成 `mulberry32`，算法不同但同为确定性）、异常分级（偏离≥25% 算 critical）、强制值注入
+- `agents.py` → 规则引擎建议（越界描述 + 专家知识兜底）、严重异常挂起仲裁、清除恢复
+- `devices.py` → 7 台设备编队、PLC 速度 2 / AGV 与机器狗速度 1、派工队列
+
+**为什么值得做**：意义在于「不装任何东西双击就能演示造纸工艺多智能体」，评审/答辩现场不用配环境。和 `pyproject.toml` 里 web extra 需要 FastAPI 3.8+ 形成互补——3.7 或无 Python 环境都能用。
+
+**验证方式**：没有 Playwright/Puppeteer，用 Node + stub DOM 执行 HTML 里真实 `<script>`：
+1. 先 stub `document.getElementById`，并模拟浏览器 select 设 innerHTML 后自动选中首个 option（第一版 stub 没模拟这个，误报了一次错，是验证脚本问题不是 HTML 问题）
+2. 暴露 `window.__MILL__` 验证接口，测投批次→跑完→注入 critical 异常→挂起→清除恢复
+3. 全部 PASS；13 步 / 四工序全 done / 日志 51 条，与之前 Python 版命令行实测数字一致 → 移植准确的硬证据
+
+**README 补「运行造纸工艺模型」章节**：三种跑法都先实跑再写——网页标签（前端按钮已读源码确认）、命令行（`Orchestrator().start_batch()/run_until_idle()` 实测 13 步跑完）、HTTP API（7 个 `/api/mill/*` 接口逐个读签名确认）。
+
+**一个易漏点**：新增 `dist/*.html` 会被 `.gitignore` 的 `dist/*` 规则吞掉，必须在白名单补一行，否则文件在本地有、推送后仓库里没有。已补 `!dist/paper-mill-offline.html`。
