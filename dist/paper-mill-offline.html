@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>造纸工艺多智能体 · 离线仿真版</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --ink:#1f2733; --muted:#6b7480;
+    --brand:#22557d; --brand-2:#2f709c; --brand-soft:#e8f1f7; --brand-line:#c6dceb;
+    --border:#e3e8ee; --ok:#22804f; --ok-soft:#e6f4ec;
+    --warn:#a2761a; --warn-soft:#fbf2dd; --crit:#b4362c; --crit-soft:#fbe9e7;
+    --idle:#8a94a1; --idle-soft:#eef1f4; --shadow:0 1px 3px rgba(20,40,60,.07);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--ink);font-size:13.5px;line-height:1.5}
+  header{background:var(--brand);color:#fff;padding:12px 22px;display:flex;align-items:center;
+         gap:14px;flex-wrap:wrap}
+  header .title{font-size:17px;font-weight:700}
+  header .sub{font-size:12px;opacity:.9}
+  header .tag{background:rgba(255,255,255,.16);border-radius:12px;padding:2px 10px;font-size:11px}
+  .wrap{max-width:1180px;margin:0 auto;padding:16px 20px 40px}
+  .notice{background:var(--warn-soft);border:1px solid #eddcb0;color:#7a5c16;
+          border-radius:8px;padding:9px 13px;font-size:12.5px;margin-bottom:14px}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  button{font-family:inherit;font-size:13px;border:1px solid var(--brand);background:var(--brand);
+         color:#fff;border-radius:7px;padding:8px 16px;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){background:var(--brand-2)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:#fff;color:var(--brand)}
+  button.ghost:hover:not(:disabled){background:var(--brand-soft)}
+  button.amber{background:var(--warn);border-color:var(--warn)}
+  button.amber:hover:not(:disabled){background:#8d6714}
+  .statusline{font-size:12.5px;color:var(--muted);margin-left:auto}
+  .statusline b{color:var(--ink)}
+  .sect-title{font-size:13px;font-weight:700;color:var(--ink);margin:18px 0 9px;
+              display:flex;align-items:center;gap:10px}
+  .sect-title .hint{font-weight:400;color:var(--muted);font-size:12px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+        box-shadow:var(--shadow)}
+  .pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media(max-width:860px){.pipe{grid-template-columns:repeat(2,1fr)}}
+  .stage{padding:12px 13px;border-top:3px solid var(--idle)}
+  .stage.running{border-top-color:var(--brand-2)}
+  .stage.done{border-top-color:var(--ok)}
+  .stage.held{border-top-color:var(--crit)}
+  .stage-head{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .stage-name{font-size:14px;font-weight:700}
+  .badge{font-size:10.5px;border-radius:9px;padding:2px 8px;white-space:nowrap}
+  .badge.idle{background:var(--idle-soft);color:var(--idle)}
+  .badge.running{background:var(--brand-soft);color:var(--brand)}
+  .badge.done{background:var(--ok-soft);color:var(--ok)}
+  .badge.held{background:var(--crit-soft);color:var(--crit)}
+  .stage-sub{font-size:11.5px;color:var(--muted);margin:2px 0 8px}
+  .工时{font-size:11.5px;color:var(--muted);margin-bottom:6px}
+  .metrics{border-top:1px dashed var(--border);padding-top:6px}
+  .metric{display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.normal{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.critical{background:var(--crit)}
+  .dot.none{background:#d5dbe2}
+  .mlabel{color:var(--muted)} .mval{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600}
+  .mval.warn{color:var(--warn)} .mval.critical{color:var(--crit)}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.cols{grid-template-columns:1fr}}
+  .col-card{padding:12px 14px;max-height:330px;overflow:auto}
+  .dec{border-left:3px solid var(--idle);padding:6px 0 6px 10px;margin-bottom:8px}
+  .dec.normal{border-left-color:var(--ok)} .dec.warn{border-left-color:var(--warn)}
+  .dec.critical{border-left-color:var(--crit)}
+  .dec .who{font-weight:700;font-size:12.5px}
+  .dec .basis{font-size:10.5px;color:var(--muted);margin-left:6px}
+  .dec .advice{font-size:12px;color:#3b4653;margin-top:2px}
+  .dev{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
+  .dev:last-child{border-bottom:none}
+  .dev .dn{font-weight:600}
+  .dev .dst{margin-left:auto;font-size:11px;color:var(--idle)}
+  .dev .dst.busy{color:var(--brand-2);font-weight:600}
+  .dev .dtask{font-size:11px;color:var(--muted)}
+  .anomaly{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px}
+  .anomaly select,.anomaly input{font-family:inherit;font-size:12.5px;border:1px solid var(--border);
+         border-radius:6px;padding:7px 9px;background:#fff;color:var(--ink)}
+  .anomaly input{width:110px}
+  .anomaly label{font-size:12px;color:var(--muted)}
+  .log{padding:10px 14px;max-height:260px;overflow:auto}
+  .ln{font-size:12px;padding:3px 0;border-bottom:1px solid #f0f2f5;display:flex;gap:8px}
+  .ln:last-child{border-bottom:none}
+  .ln .step{color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+  .ln .ev{color:var(--brand);flex:none;min-width:88px}
+  .ln .msg{color:#3b4653}
+  .ln.arbitration .ev,.ln.anomaly_injected .ev{color:var(--crit)}
+  .empty{color:var(--muted);font-size:12px;padding:8px 0}
+  footer{text-align:center;color:var(--muted);font-size:11.5px;padding:20px}
+</style>
+</head>
+<body>
+<header>
+  <span class="title">造纸工艺多智能体</span>
+  <span class="sub">离线仿真版 · 双击即用 · 零依赖</span>
+  <span class="tag">仿真演示，不连接任何真实产线</span>
+</header>
+
+<div class="wrap">
+  <div class="notice">
+    四道工序（制浆 → 抄纸 → 干燥 → 质检）各由一个智能体负责，总调度器编排任务、派 AGV / 机器狗 / PLC 作业。
+    工况由确定性随机数生成，设备为内存模拟对象。数值与在线 Python 版生成规则一致，但使用独立随机序列。
+  </div>
+
+  <div class="toolbar">
+    <button id="btnStart">投批次</button>
+    <button id="btnStep" class="ghost">单步</button>
+    <button id="btnRun" class="ghost">自动跑完</button>
+    <button id="btnResume" class="ghost">清除异常并恢复</button>
+    <button id="btnReset" class="ghost">重置</button>
+    <span class="statusline" id="statusline">尚未投产，点「投批次」开始。</span>
+  </div>
+
+  <div class="sect-title">工序流水线 <span class="hint" id="stepLabel">仿真步 0</span></div>
+  <div class="pipe" id="pipe"></div>
+
+  <div class="sect-title">异常注入（演示智能体处置链）</div>
+  <div class="card anomaly">
+    <label>工序</label><select id="anomProcess"></select>
+    <label>指标</label><select id="anomMetric"></select>
+    <label>数值</label><input id="anomValue" type="number" step="0.01" value="0" />
+    <button class="amber" id="btnInject">注入异常</button>
+    <span class="hint" id="anomHint" style="font-size:11px;color:var(--muted)"></span>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="sect-title">智能体决策 <span class="hint">离线版使用规则引擎（联网版可接大模型）</span></div>
+      <div class="card col-card" id="decisions"></div>
+    </div>
+    <div>
+      <div class="sect-title">设备任务 <span class="hint" id="devHint"></span></div>
+      <div class="card col-card" id="devices"></div>
+    </div>
+  </div>
+
+  <div class="sect-title">调度日志 <span class="hint" id="logHint">0 条</span></div>
+  <div class="card log" id="log"></div>
+
+  <footer>造纸工厂多智能体 · 碳核算 Agent 项目配套离线演示　|　规则与区间取自公开工艺常识，仅供仿真演示</footer>
+</div>
+
+<script>
+/* ==================== 工序定义（对应 mill/processes.py） ==================== */
+const ORDER = ["pulping", "papermaking", "drying", "quality"];
+const PROCESSES = {
+  pulping: {
+    name: "制浆", subtitle: "碎浆 · 脱墨 · 漂白", base_time: 3,
+    devices: ["agv-01", "plc-pulp"],
+    metrics: [
+      {key:"pulp_consistency", label:"浆浓", unit:"%", low:2.5, high:4.5},
+      {key:"pulping_temp", label:"碎浆温度", unit:"°C", low:55, high:75},
+      {key:"brightness", label:"白度", unit:"%ISO", low:78, high:88}
+    ],
+    knowledge: [
+      "浆浓过高会增大泵送负荷、影响后续筛选；过低则降低产能。",
+      "脱墨段温度偏高有利于油墨剥离，但过高会增加能耗与纤维损伤。",
+      "白度不达标时优先检查漂白剂用量与浆料停留时间。"
+    ]
+  },
+  papermaking: {
+    name: "抄纸", subtitle: "流送 · 成形 · 压榨", base_time: 4,
+    devices: ["plc-paper", "agv-02"],
+    metrics: [
+      {key:"machine_speed", label:"车速", unit:"m/min", low:600, high:900},
+      {key:"basis_weight", label:"定量", unit:"g/m²", low:60, high:120},
+      {key:"pressure", label:"压榨线压力", unit:"kN/m", low:30, high:60}
+    ],
+    knowledge: [
+      "车速提高时若定量波动变大，应先稳住流送泵的脉冲。",
+      "定量偏轻通常来自上网浓度偏低或脱水过快。",
+      "压榨线压力过高会造成湿部断纸，需与毛毯状态联动判断。"
+    ]
+  },
+  drying: {
+    name: "干燥", subtitle: "蒸汽优化 · 数字孪生", base_time: 4,
+    devices: ["plc-dryer", "robot-dog-01"],
+    metrics: [
+      {key:"dryer_temp", label:"烘缸温度", unit:"°C", low:105, high:135},
+      {key:"steam_pressure", label:"蒸汽压力", unit:"MPa", low:0.3, high:0.6},
+      {key:"moisture", label:"成纸水分", unit:"%", low:5.0, high:7.0}
+    ],
+    knowledge: [
+      "干燥是造纸能耗最高的环节，蒸汽压力在小幅波动内优先维持稳定。",
+      "成纸水分偏高会引发后续卷曲折皱，偏低则纸张发脆。",
+      "数字孪生可在不停机的情况下评估提车速对蒸汽单耗的影响。"
+    ]
+  },
+  quality: {
+    name: "质检", subtitle: "视觉检测 · 定量水分", base_time: 2,
+    devices: ["robot-dog-01", "plc-qc"],
+    metrics: [
+      {key:"defect_rate", label:"缺陷率", unit:"%", low:0.0, high:1.5},
+      {key:"moisture_check", label:"抽检水分", unit:"%", low:5.0, high:7.0},
+      {key:"pass_rate", label:"合格率", unit:"%", low:95.0, high:100.0}
+    ],
+    knowledge: [
+      "缺陷率连续升高时，向前追溯干燥温度与压榨压力。",
+      "抽检水分与在线水分偏差超过 0.5% 时，先校准在线仪表。",
+      "质检智能体只给出处置建议，判废与放行由人工确认。"
+    ]
+  }
+};
+
+/* ==================== 确定性随机（对应 random.Random(seed)） ==================== */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ==================== 指标状态判定（对应 Metric.status） ==================== */
+function metricStatus(m, value){
+  if(value >= m.low && value <= m.high) return "normal";
+  const span = m.high - m.low;
+  if(span <= 0) return "critical";
+  const dev = value < m.low ? (m.low - value) / span : (value - m.high) / span;
+  return dev >= 0.25 ? "critical" : "warn";
+}
+function stageOverall(stage){
+  const vals = Object.values(stage.metricStatus);
+  if(vals.indexOf("critical") >= 0) return "critical";
+  if(vals.indexOf("warn") >= 0) return "warn";
+  return "normal";
+}
+
+/* ==================== 仿真引擎（对应 mill/simulation.py） ==================== */
+function newSim(seed){
+  seed = seed || 2024;
+  const stages = {};
+  ORDER.forEach(k => stages[k] = {key:k, state:"idle", elapsed:0, metrics:{}, metricStatus:{}});
+  return {rng: mulberry32(seed), seed:seed, step:0, batchId:null, stages:stages, forced:{}};
+}
+function generateMetrics(sim, stage){
+  PROCESSES[stage.key].metrics.forEach(m => {
+    const fk = stage.key + "|" + m.key;
+    let value;
+    if(Object.prototype.hasOwnProperty.call(sim.forced, fk)){
+      value = sim.forced[fk];
+    } else if(sim.rng() < 0.1){
+      const span = m.high - m.low;
+      const lo = m.low - 0.12 * span, hi = m.high + 0.12 * span;
+      value = sim.rng() * (hi - lo) + lo;
+    } else {
+      const span = m.high - m.low;
+      const lo = m.low + 0.15 * span, hi = m.high - 0.15 * span;
+      value = sim.rng() * (hi - lo) + lo;
+    }
+    const decimals = (m.high - m.low) >= 50 ? 0 : 2;
+    stage.metrics[m.key] = parseFloat(value.toFixed(decimals));
+    stage.metricStatus[m.key] = metricStatus(m, value);
+  });
+}
+function beginProcess(sim, key){
+  const s = sim.stages[key];
+  s.state = "running"; s.elapsed = 0;
+  generateMetrics(sim, s);
+}
+function startBatchSim(sim, batchId){
+  sim.batchId = batchId;
+  sim.forced = {};
+  ORDER.forEach(k => {
+    const s = sim.stages[k];
+    s.state = "idle"; s.elapsed = 0; s.metrics = {}; s.metricStatus = {};
+  });
+  beginProcess(sim, "pulping");
+}
+function nextProcess(key){
+  const i = ORDER.indexOf(key);
+  return (i >= 0 && i + 1 < ORDER.length) ? ORDER[i + 1] : null;
+}
+function finishCompleted(sim){
+  const done = [];
+  ORDER.forEach(k => {
+    const s = sim.stages[k];
+    if(s.state === "running" && s.elapsed >= PROCESSES[k].base_time){
+      s.state = "done"; done.push(k);
+    }
+  });
+  return done;
+}
+function allIdle(sim){
+  if(sim.batchId === null) return true;
+  return ORDER.every(k => sim.stages[k].state !== "running");
+}
+function simAdvance(sim){
+  sim.step++;
+  ORDER.forEach(k => {
+    const s = sim.stages[k];
+    if(s.state === "running"){ s.elapsed++; generateMetrics(sim, s); }
+  });
+}
+function injectAnomalySim(sim, process, metric, value){
+  const proc = PROCESSES[process];
+  if(!proc || !proc.metrics.some(m => m.key === metric)) return false;
+  sim.forced[process + "|" + metric] = value;
+  const s = sim.stages[process];
+  if(s.state === "running"){
+    s.metrics[metric] = value;
+    const m = proc.metrics.filter(x => x.key === metric)[0];
+    s.metricStatus[metric] = metricStatus(m, value);
+  }
+  return true;
+}
+function clearAndResume(sim){
+  sim.forced = {};
+  ORDER.forEach(k => {
+    const s = sim.stages[k];
+    if(s.state === "held") beginProcess(sim, k);
+    else if(s.state === "running") generateMetrics(sim, s);
+  });
+}
+
+/* ==================== 设备层（对应 mill/devices.py） ==================== */
+function newFleet(){
+  const defs = {
+    "agv-01": ["AGV 运输车 1 号", "agv", 1],
+    "agv-02": ["AGV 运输车 2 号", "agv", 1],
+    "robot-dog-01": ["巡检机器狗", "robot_dog", 1],
+    "plc-pulp": ["制浆 PLC", "plc", 2],
+    "plc-paper": ["抄纸 PLC", "plc", 2],
+    "plc-dryer": ["干燥 PLC", "plc", 2],
+    "plc-qc": ["质检 PLC", "plc", 2]
+  };
+  const devices = {};
+  Object.keys(defs).forEach(id => {
+    devices[id] = {id:id, name:defs[id][0], kind:defs[id][1], speed:defs[id][2],
+                   current:null, queue:[], doneCount:0};
+  });
+  return {devices:devices};
+}
+function assignDevice(d, task){
+  if(d.current === null){ d.current = task; return true; }
+  d.queue.push(task); return false;
+}
+function dispatchFor(fleet, processKey, action, taskId){
+  const sent = [];
+  PROCESSES[processKey].devices.forEach(id => {
+    const d = fleet.devices[id];
+    if(!d) return;
+    const remaining = d.kind === "plc" ? 2 : 3;
+    const task = {taskId:taskId + "-" + id, process:processKey, action:action, remaining:remaining};
+    if(assignDevice(d, task)) sent.push(id);
+  });
+  return sent;
+}
+function fleetTick(fleet, step){
+  const results = [];
+  Object.keys(fleet.devices).forEach(id => {
+    const d = fleet.devices[id];
+    if(d.current === null) return;
+    d.current.remaining -= d.speed;
+    if(d.current.remaining > 0) return;
+    const done = d.current;
+    results.push({deviceId:id, taskId:done.taskId,
+      message:d.name + " 完成 " + PROCESSES[done.process].name + " / " + done.action, step:step});
+    d.doneCount++;
+    d.current = d.queue.length ? d.queue.shift() : null;
+  });
+  return results;
+}
+
+/* ==================== 调度智能体（对应 mill/agents.py） ==================== */
+function newOrch(){
+  return {sim:newSim(2024), fleet:newFleet(), decisions:{}, log:[], batchSeq:0, taskSeq:0};
+}
+function emit(o, event, kw){
+  o.log.push(Object.assign({step:o.sim.step, event:event}, kw || {}));
+  if(o.log.length > 200) o.log = o.log.slice(-200);
+}
+function nextTaskId(o, prefix){ o.taskSeq++; return prefix + "-" + String(o.taskSeq).padStart(3, "0"); }
+function dispatchProcess(o, key, action){
+  const sent = dispatchFor(o.fleet, key, action, nextTaskId(o, "T"));
+  emit(o, "dispatch", {process:key, action:action, devices:sent});
+}
+function fmt(v){
+  const f = Number(v);
+  if(Math.abs(f - Math.round(f)) < 1e-9) return String(Math.round(f));
+  return f.toFixed(2);
+}
+function ruleAdvice(proc, stage){
+  const abnormal = proc.metrics.filter(m => (stage.metricStatus[m.key] || "normal") !== "normal");
+  if(abnormal.length === 0) return "工况正常，维持当前参数，继续下一工序。";
+  const parts = abnormal.map(m => {
+    const v = stage.metrics[m.key];
+    const tag = stage.metricStatus[m.key] === "critical" ? "严重偏离" : "轻微越界";
+    return m.label + " " + tag + fmt(v) + "（正常 " + fmt(m.low) + "–" + fmt(m.high) + " " + m.unit + "）";
+  });
+  return "异常：" + parts.join("；") + "。" + (proc.knowledge[0] || "请人工复核。");
+}
+function decide(o, key){
+  const s = o.sim.stages[key];
+  const proc = PROCESSES[key];
+  const status = stageOverall(s);
+  let actions = [];
+  if(status === "critical") actions = ["hold", "dispatch_robot_dog"];
+  else if(status === "warn") actions = ["slow_down", "notify_plc"];
+  const dec = {agent:proc.name + "智能体", process:key, status:status,
+               advice:ruleAdvice(proc, s), basis:"rule", actions:actions};
+  o.decisions[key] = dec;
+  return dec;
+}
+function startBatch(o){
+  o.batchSeq++;
+  const batch = "B" + String(o.batchSeq).padStart(3, "0");
+  startBatchSim(o.sim, batch);
+  emit(o, "batch_start", {batch:batch, process:"pulping"});
+  dispatchProcess(o, "pulping", "start");
+}
+function step(o){
+  simAdvance(o.sim);
+  fleetTick(o.fleet, o.sim.step).forEach(r =>
+    emit(o, "device_done", {device:r.deviceId, task:r.taskId, message:r.message}));
+
+  ORDER.forEach(k => {
+    const s = o.sim.stages[k];
+    if(s.state !== "running" && s.state !== "done") return;
+    const dec = decide(o, k);
+    emit(o, "decision", {process:k, status:dec.status, basis:dec.basis, advice:dec.advice});
+    if(dec.status === "critical" && s.state === "running"){
+      s.state = "held";
+      emit(o, "arbitration", {process:k, action:"hold", reason:"工况严重偏离，需人工确认后恢复"});
+      dispatchProcess(o, k, "inspect");
+    } else if(dec.status === "warn" && s.state === "running"){
+      dispatchProcess(o, k, "adjust");
+    }
+  });
+
+  finishCompleted(o.sim).forEach(k => {
+    emit(o, "process_done", {process:k});
+    const nxt = nextProcess(k);
+    if(nxt){
+      beginProcess(o.sim, nxt);
+      emit(o, "process_begin", {process:nxt});
+      dispatchProcess(o, nxt, "start");
+    } else {
+      emit(o, "batch_complete", {batch:o.sim.batchId});
+    }
+  });
+}
+function runUntilIdle(o, maxSteps){
+  let n = 0;
+  while(n < (maxSteps || 80) && !allIdle(o.sim)){ step(o); n++; }
+}
+
+/* ==================== 渲染 ==================== */
+let O = newOrch();
+const STATE_LABEL = {idle:"待机", running:"运行中", done:"完成", held:"已挂起"};
+const $ = id => document.getElementById(id);
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+    ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;"})[c]);
+}
+function render(){
+  const sim = O.sim;
+  $("stepLabel").textContent = "仿真步 " + sim.step;
+  $("statusline").innerHTML = sim.batchId
+    ? '当前批次 <b>' + sim.batchId + '</b> · ' + (allIdle(sim) ? '流水线空闲' : '流水线运行中')
+    : '尚未投产，点「投批次」开始。';
+
+  // 流水线
+  $("pipe").innerHTML = ORDER.map(k => {
+    const s = sim.stages[k], proc = PROCESSES[k];
+    const metrics = proc.metrics.map(m => {
+      const v = s.metrics[m.key];
+      const st = s.metricStatus[m.key] || "none";
+      return '<div class="metric"><span class="dot ' + st + '"></span>' +
+             '<span class="mlabel">' + m.label + '</span>' +
+             '<span class="mval ' + (st === "none" ? "" : st) + '">' +
+             (v === undefined ? "—" : fmt(v) + " " + m.unit) + '</span></div>';
+    }).join("");
+    return '<div class="card stage ' + s.state + '">' +
+      '<div class="stage-head"><span class="stage-name">' + proc.name + '</span>' +
+      '<span class="badge ' + s.state + '">' + STATE_LABEL[s.state] + '</span></div>' +
+      '<div class="stage-sub">' + proc.subtitle + '</div>' +
+      '<div class="工时">工时 ' + s.elapsed + ' / ' + proc.base_time + '</div>' +
+      '<div class="metrics">' + metrics + '</div></div>';
+  }).join("");
+
+  // 智能体决策
+  const decs = ORDER.filter(k => O.decisions[k]).map(k => O.decisions[k]);
+  $("decisions").innerHTML = decs.length
+    ? decs.map(d => '<div class="dec ' + d.status + '">' +
+        '<span class="who">' + esc(d.agent) + '</span>' +
+        '<span class="basis">[规则引擎]</span>' +
+        '<div class="advice">' + esc(d.advice) + '</div></div>').join("")
+    : '<div class="empty">投产之后，各工序智能体的决策会显示在这里。</div>';
+
+  // 设备
+  const devs = Object.keys(O.fleet.devices).map(id => O.fleet.devices[id]);
+  $("devices").innerHTML = devs.map(d => {
+    const busy = d.current !== null;
+    const task = busy ? d.current.action + " / " + PROCESSES[d.current.process].name : "";
+    return '<div class="dev"><span class="dn">' + d.name + '</span>' +
+      '<span class="dtask">' + esc(task) + '</span>' +
+      '<span class="dst ' + (busy ? "busy" : "") + '">' + (busy ? "作业中" : "空闲") +
+      (d.doneCount ? " · 完成" + d.doneCount : "") + '</span></div>';
+  }).join("");
+  $("devHint").textContent = devs.filter(d => d.current).length + " 台作业中 / 共 " + devs.length + " 台";
+
+  // 日志
+  const logs = O.log.slice().reverse();
+  $("log").innerHTML = logs.length
+    ? logs.map(ln => '<div class="ln ' + ln.event + '">' +
+        '<span class="step">#' + ln.step + '</span>' +
+        '<span class="ev">' + esc(ln.event) + '</span>' +
+        '<span class="msg">' + esc(ln.message || ln.reason ||
+          (ln.process ? "[" + PROCESSES[ln.process].name + "] " + (ln.action || ln.status || "") : "") ||
+          (ln.batch || "")) + '</span></div>').join("")
+    : '<div class="empty">调度日志为空。投批次后会记录派工、决策、流转与仲裁事件。</div>';
+  $("logHint").textContent = O.log.length + " 条";
+}
+
+/* ==================== 交互 ==================== */
+function fillProcesses(){
+  $("anomProcess").innerHTML = ORDER.map(k =>
+    '<option value="' + k + '">' + PROCESSES[k].name + '</option>').join("");
+  fillMetrics();
+}
+function fillMetrics(){
+  const k = $("anomProcess").value;
+  const ms = PROCESSES[k].metrics;
+  $("anomMetric").innerHTML = ms.map(m =>
+    '<option value="' + m.key + '">' + m.label + '(' + fmt(m.low) + '~' + fmt(m.high) + m.unit + ')</option>').join("");
+  suggestAnomalyValue();
+}
+function suggestAnomalyValue(){
+  const k = $("anomProcess").value;
+  const m = PROCESSES[k].metrics.filter(x => x.key === $("anomMetric").value)[0];
+  if(m){ $("anomValue").value = (m.high + 0.5 * (m.high - m.low)).toFixed(2); }
+  $("anomHint").textContent = "建议填入超出区间的越界值（已自动给出一个）";
+}
+$("btnStart").onclick = () => { startBatch(O); render(); };
+$("btnStep").onclick = () => {
+  if(allIdle(O.sim)){ $("statusline").textContent = "流水线空闲，请先投批次。"; return; }
+  step(O); render();
+};
+$("btnRun").onclick = () => {
+  if(allIdle(O.sim)){ $("statusline").textContent = "流水线空闲，请先投批次。"; return; }
+  runUntilIdle(O, 80); render();
+};
+$("btnResume").onclick = () => {
+  clearAndResume(O.sim);
+  emit(O, "anomaly_injected", {process:"-", metric:"cleared", value:0, message:"人工确认：清除异常并恢复挂起工序"});
+  render();
+};
+$("btnReset").onclick = () => { O = newOrch(); render(); };
+$("btnInject").onclick = () => {
+  const p = $("anomProcess").value, m = $("anomMetric").value;
+  const v = parseFloat($("anomValue").value);
+  if(isNaN(v)){ $("anomHint").textContent = "请输入有效数值"; return; }
+  if(injectAnomalySim(O.sim, p, m, v)){
+    emit(O, "anomaly_injected", {process:p, metric:m, value:v,
+      message:"注入异常 " + PROCESSES[p].name + " / " + m + " = " + v});
+  }
+  render();
+};
+$("anomProcess").onchange = fillMetrics;
+$("anomMetric").onchange = suggestAnomalyValue;
+
+fillProcesses();
+render();
+
+/* 供自动化验证调用（不影响页面使用） */
+window.__MILL__ = {O:() => O, startBatch, step, runUntilIdle, injectAnomalySim, clearAndResume, allIdle};
+</script>
+</body>
+</html>
